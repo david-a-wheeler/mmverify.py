@@ -20,6 +20,7 @@ import sys
 import itertools
 import collections
 import os.path
+from optparse import OptionParser
 
 verbosity = 1
 
@@ -167,11 +168,13 @@ class FrameStack(list):
         return (dvs, f_hyps, e_hyps, stat)
 
 class MM:
-    def __init__(self):
+    def __init__(self, begin_label, stop_label):
         self.fs = FrameStack()
         self.labels = {}
+        self.begin_label = begin_label
+        self.stop_label = stop_label
 
-    def read(self, toks, stop_label):
+    def read(self, toks):
         self.fs.push()
         label = None
         tok = toks.readc()
@@ -190,7 +193,7 @@ class MM:
                 label = None
             elif tok == '$a':
                 if not label: raise MMError('$a must have label')
-                if label == stop_label: sys.exit(0)
+                if label == self.stop_label: sys.exit(0)
                 self.labels[label] = ('$a',
                                       self.fs.make_assertion(toks.readstat()))
                 label = None
@@ -202,7 +205,7 @@ class MM:
                 label = None
             elif tok == '$p':
                 if not label: raise MMError('$p must have label')
-                if label == stop_label: sys.exit(0)
+                if label == self.stop_label: sys.exit(0)
                 stat = toks.readstat()
                 proof = None
                 try:
@@ -211,12 +214,15 @@ class MM:
                     stat = stat[:i]
                 except ValueError:
                      raise MMError('$p must contain proof after $=')
-                vprint(1, 'verifying', label)
-                self.verify(label, stat, proof)
+                if self.begin_label and label == self.begin_label:
+                    self.begin_label = None
+                if not self.begin_label:
+                    vprint(1, 'verifying', label)
+                    self.verify(label, stat, proof)
                 self.labels[label] = ('$p', self.fs.make_assertion(stat))
                 label = None
             elif tok == '$d': self.fs.add_d(toks.readstat())
-            elif tok == '${': self.read(toks, stop_label)
+            elif tok == '${': self.read(toks)
             elif tok[0] != '$': label = tok
             else: print('tok:', tok)
             tok = toks.readc()
@@ -352,10 +358,12 @@ class MM:
     def dump(self): print(self.labels)
 
 if __name__ == '__main__':
-    if len(sys.argv) == 3 and sys.argv[1] == '--stop-label':
-        stop_label = sys.argv[2]
-    else:
-        stop_label = None
-    mm = MM()
-    mm.read(toks(sys.stdin), stop_label)
+    parser = OptionParser()
+    parser.add_option('-b', '--begin-label', dest='begin_label',
+                      help='label to begin verifying')
+    parser.add_option('-s', '--stop-label', dest='stop_label',
+                      help='label to stop verifying')
+    (options, args) = parser.parse_args()
+    mm = MM(options.begin_label, options.stop_label)
+    mm.read(toks(sys.stdin))
     #mm.dump()
