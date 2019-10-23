@@ -171,7 +171,7 @@ class MM:
         self.fs = FrameStack()
         self.labels = {}
 
-    def read(self, toks):
+    def read(self, toks, stop_label):
         self.fs.push()
         label = None
         tok = toks.readc()
@@ -190,6 +190,7 @@ class MM:
                 label = None
             elif tok == '$a':
                 if not label: raise MMError('$a must have label')
+                if label == stop_label: sys.exit(0)
                 self.labels[label] = ('$a',
                                       self.fs.make_assertion(toks.readstat()))
                 label = None
@@ -201,6 +202,7 @@ class MM:
                 label = None
             elif tok == '$p':
                 if not label: raise MMError('$p must have label')
+                if label == stop_label: sys.exit(0)
                 stat = toks.readstat()
                 proof = None
                 try:
@@ -214,7 +216,7 @@ class MM:
                 self.labels[label] = ('$p', self.fs.make_assertion(stat))
                 label = None
             elif tok == '$d': self.fs.add_d(toks.readstat())
-            elif tok == '${': self.read(toks)
+            elif tok == '${': self.read(toks, stop_label)
             elif tok[0] != '$': label = tok
             else: print('tok:', tok)
             tok = toks.readc()
@@ -350,6 +352,10 @@ class MM:
     def dump(self): print(self.labels)
 
 if __name__ == '__main__':
+    if len(sys.argv) == 3 and sys.argv[1] == '--stop-label':
+        stop_label = sys.argv[2]
+    else:
+        stop_label = None
     mm = MM()
-    mm.read(toks(sys.stdin))
+    mm.read(toks(sys.stdin), stop_label)
     #mm.dump()
