@@ -1,0 +1,15 @@
+Re: Speed up mmverify.py? (Also, ACM email doesn't work)
+Time: 	Tue, 22 Oct 2019 20:09:19 -0700
+From: 	Raph Levien <REDACTED>
+To: 	"David A. Wheeler" <REDACTED>   	 
+Subject: 	Re: Speed up mmverify.py? (Also, ACM email doesn't work)   	 
+I'm dealing with serious overload between work and family commitments. If
+you want to treat that as the authoritative repo for it, I have no
+objections. Part of why I didn't respond earlier is that I was looking for
+earlier versions so I might be able to reconstruct a better history, but I
+didn't find much. mmverify.py became the basis for mm_xlat.py, which does
+have more of a history, but that's probably out of scope for what you're
+doing.
+
+I own the copyright on mmverify.py so am also happy to relicense - I would
+generally prefer permissive licenses such as MIT these days.
