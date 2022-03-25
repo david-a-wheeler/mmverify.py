@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # mmverify.py -- Proof verifier for the Metamath language
 # Copyright (C) 2002 Raph Levien raph (at) acm (dot) org
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License
+# This program is free software distributed under the MIT license;
+# see the file LICENSE for full license information.
 
 # To run the program, type
 #   $ python3 mmverify.py < set.mm 2> set.log
