@@ -20,7 +20,7 @@ import sys
 import itertools
 import collections
 import os.path
-from optparse import OptionParser
+import argparse
 
 verbosity = 1
 
@@ -193,6 +193,26 @@ def apply_subst(stat, subst):
             result.append(tok)
     vprint(20, 'apply_subst:', stat, subst, '=', result)
     return result
+
+
+# Return whether stmt2 is the result of applying subst to stmt1
+# Faster than 'stmt2 == apply_subst(stmt1, subst)' since it does not
+# build the latter.
+# Note: seems to give 0.5% slower runs...
+def equal_subst(stmt1, subst, stmt2):
+    i = 0
+    for tok in stmt1:
+        if tok in subst:
+            substmt = subst[tok]
+            length = len(substmt)
+            if stmt2[i:i + length] != substmt:
+                return False
+            i += length
+        else:
+            if stmt2[i] != tok:
+                return False
+            i += 1
+    return i == len(stmt2)
 
 
 class MM:
@@ -382,11 +402,16 @@ class MM:
                                     x, y))
                 for h in e_hyps0:
                     entry = stack[sp]
-                    subst_h = apply_subst(h, subst)
-                    if entry != subst_h:
+# comment either the following four lines, or the next five lines
+                    if not equal_subst(h, subst, entry):
                         raise MMError(("stack entry {0!s} does not match " +
                                        "essential hypothesis {1!s}")
-                                      .format(entry, subst_h))
+                                      .format(entry, apply_subst(h, subst)))
+#                    subst_h = apply_subst(h, subst)
+#                    if entry != subst_h:
+#                        raise MMError(("stack entry {0!s} does not match " +
+#                                       "essential hypothesis {1!s}")
+#                                      .format(entry, subst_h))
                     sp += 1
                 del stack[len(stack) - npop:]
                 stack.append(apply_subst(conclusion0, subst))
@@ -403,12 +428,12 @@ class MM:
 
 
 if __name__ == '__main__':
-    parser = OptionParser()
-    parser.add_option('-b', '--begin-label', dest='begin_label',
-                      help='label to begin verifying')
-    parser.add_option('-s', '--stop-label', dest='stop_label',
-                      help='label to stop verifying')
-    (options, args) = parser.parse_args()
-    mm = MM(options.begin_label, options.stop_label)
+    parser = argparse.ArgumentParser(description='Verify a Metamth database.')
+    parser.add_argument('-b', '--begin-label', dest='begin_label',
+                        help='label to begin verifying (included)')
+    parser.add_argument('-s', '--stop-label', dest='stop_label',
+                        help='label to stop verifying (not included)')
+    args = parser.parse_args()
+    mm = MM(args.begin_label, args.stop_label)
     mm.read(toks(sys.stdin))
     # mm.dump()
