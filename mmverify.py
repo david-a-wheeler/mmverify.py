@@ -24,11 +24,19 @@ from optparse import OptionParser
 
 verbosity = 1
 
-class MMError(Exception): pass
-class MMKeyError(MMError, KeyError): pass
+
+class MMError(Exception):
+    pass
+
+
+class MMKeyError(MMError, KeyError):
+    pass
+
 
 def vprint(vlevel, *args):
-    if verbosity >= vlevel: print(*args, file=sys.stderr)
+    if verbosity >= vlevel:
+        print(*args, file=sys.stderr)
+
 
 class toks:
     def __init__(self, lines):
@@ -41,7 +49,8 @@ class toks:
             line = self.lines_buf[-1].readline()
             if not line:
                 self.lines_buf.pop().close()
-                if not self.lines_buf: return None
+                if not self.lines_buf:
+                    return None
             else:
                 self.tokbuf = line.split()
                 self.tokbuf.reverse()
@@ -64,7 +73,8 @@ class toks:
     def readc(self):
         while 1:
             tok = self.readf()
-            if tok == None: return None
+            if tok == None:
+                return None
             if tok == '$(':
                 while tok != '$)':
                     tok = self.read()
@@ -75,10 +85,12 @@ class toks:
         stat = []
         tok = self.readc()
         while tok != '$.':
-            if tok == None: raise MMError('EOF before $.')
+            if tok == None:
+                raise MMError('EOF before $.')
             stat.append(tok)
             tok = self.readc()
         return stat
+
 
 class Frame:
     def __init__(self):
@@ -90,20 +102,23 @@ class Frame:
         self.e = []
         self.e_labels = {}
 
+
 class FrameStack(list):
     def push(self):
         self.append(Frame())
 
     def add_c(self, tok):
         frame = self[-1]
-        if tok in frame.c: raise MMError('const already defined in scope')
+        if tok in frame.c:
+            raise MMError('const already defined in scope')
         if tok in frame.v:
             raise MMError('const already defined as var in scope')
         frame.c.add(tok)
 
     def add_v(self, tok):
         frame = self[-1]
-        if tok in frame.v: raise MMError('var already defined in scope')
+        if tok in frame.v:
+            raise MMError('var already defined in scope')
         if tok in frame.c:
             raise MMError('var already defined as const in scope')
         frame.v.add(tok)
@@ -126,7 +141,7 @@ class FrameStack(list):
 
     def add_d(self, stat):
         frame = self[-1]
-        frame.d.update(((min(x,y), max(x,y))
+        frame.d.update(((min(x, y), max(x, y))
                         for x, y in itertools.product(stat, stat) if x != y))
 
     def lookup_c(self, tok): return any((tok in fr.c for fr in reversed(self)))
@@ -134,27 +149,31 @@ class FrameStack(list):
 
     def lookup_f(self, var):
         for frame in reversed(self):
-            try: return frame.f_labels[var]
-            except KeyError: pass
+            try:
+                return frame.f_labels[var]
+            except KeyError:
+                pass
         raise MMKeyError(var)
 
     def lookup_d(self, x, y):
-        return any(((min(x,y), max(x,y)) in fr.d for fr in reversed(self)))
+        return any(((min(x, y), max(x, y)) in fr.d for fr in reversed(self)))
 
     def lookup_e(self, stmt):
         stmt_t = tuple(stmt)
         for frame in reversed(self):
-            try: return frame.e_labels[stmt_t]
-            except KeyError: pass
+            try:
+                return frame.e_labels[stmt_t]
+            except KeyError:
+                pass
         raise MMKeyError(stmt_t)
 
     def make_assertion(self, stat):
         frame = self[-1]
         e_hyps = [eh for fr in self for eh in fr.e]
         mand_vars = {tok for hyp in itertools.chain(e_hyps, [stat])
-                         for tok in hyp if self.lookup_v(tok)}
+                     for tok in hyp if self.lookup_v(tok)}
 
-        dvs = {(x,y) for fr in self for (x,y) in
+        dvs = {(x, y) for fr in self for (x, y) in
                fr.d.intersection(itertools.product(mand_vars, mand_vars))}
 
         f_hyps = collections.deque()
@@ -166,6 +185,7 @@ class FrameStack(list):
 
         vprint(18, 'ma:', (dvs, f_hyps, e_hyps, stat))
         return (dvs, f_hyps, e_hyps, stat)
+
 
 class MM:
     def __init__(self, begin_label, stop_label):
@@ -180,32 +200,41 @@ class MM:
         tok = toks.readc()
         while tok not in (None, '$}'):
             if tok == '$c':
-                for tok in toks.readstat(): self.fs.add_c(tok)
+                for tok in toks.readstat():
+                    self.fs.add_c(tok)
             elif tok == '$v':
-                for tok in toks.readstat(): self.fs.add_v(tok)
+                for tok in toks.readstat():
+                    self.fs.add_v(tok)
             elif tok == '$f':
                 stat = toks.readstat()
-                if not label: raise MMError('$f must have label')
-                if len(stat) != 2: raise MMError('$f must have be length 2')
+                if not label:
+                    raise MMError('$f must have label')
+                if len(stat) != 2:
+                    raise MMError('$f must have be length 2')
                 vprint(15, label, '$f', stat[0], stat[1], '$.')
                 self.fs.add_f(stat[1], stat[0], label)
                 self.labels[label] = ('$f', [stat[0], stat[1]])
                 label = None
             elif tok == '$a':
-                if not label: raise MMError('$a must have label')
-                if label == self.stop_label: sys.exit(0)
+                if not label:
+                    raise MMError('$a must have label')
+                if label == self.stop_label:
+                    sys.exit(0)
                 self.labels[label] = ('$a',
                                       self.fs.make_assertion(toks.readstat()))
                 label = None
             elif tok == '$e':
-                if not label: raise MMError('$e must have label')
+                if not label:
+                    raise MMError('$e must have label')
                 stat = toks.readstat()
                 self.fs.add_e(stat, label)
                 self.labels[label] = ('$e', stat)
                 label = None
             elif tok == '$p':
-                if not label: raise MMError('$p must have label')
-                if label == self.stop_label: sys.exit(0)
+                if not label:
+                    raise MMError('$p must have label')
+                if label == self.stop_label:
+                    sys.exit(0)
                 stat = toks.readstat()
                 proof = None
                 try:
@@ -213,7 +242,7 @@ class MM:
                     proof = stat[i + 1:]
                     stat = stat[:i]
                 except ValueError:
-                     raise MMError('$p must contain proof after $=')
+                    raise MMError('$p must contain proof after $=')
                 if self.begin_label and label == self.begin_label:
                     self.begin_label = None
                 if not self.begin_label:
@@ -221,25 +250,32 @@ class MM:
                     self.verify(label, stat, proof)
                 self.labels[label] = ('$p', self.fs.make_assertion(stat))
                 label = None
-            elif tok == '$d': self.fs.add_d(toks.readstat())
-            elif tok == '${': self.read(toks)
-            elif tok[0] != '$': label = tok
-            else: print('tok:', tok)
+            elif tok == '$d':
+                self.fs.add_d(toks.readstat())
+            elif tok == '${':
+                self.read(toks)
+            elif tok[0] != '$':
+                label = tok
+            else:
+                print('tok:', tok)
             tok = toks.readc()
         self.fs.pop()
 
     def apply_subst(self, stat, subst):
         result = []
         for tok in stat:
-            if tok in subst: result.extend(subst[tok])
-            else: result.append(tok)
+            if tok in subst:
+                result.extend(subst[tok])
+            else:
+                result.append(tok)
         vprint(20, 'apply_subst', (stat, subst), '=', result)
         return result
 
     def find_vars(self, stat):
         vars = []
         for x in stat:
-            if not x in vars and self.fs.lookup_v(x): vars.append(x)
+            if not x in vars and self.fs.lookup_v(x):
+                vars.append(x)
         return vars
 
     def decompress_proof(self, stat, proof):
@@ -261,7 +297,8 @@ class MM:
         cur_int = 0
 
         for ch in compressed_proof:
-            if ch == 'Z': proof_ints.append(-1)
+            if ch == 'Z':
+                proof_ints.append(-1)
             elif 'A' <= ch and ch <= 'T':
                 cur_int = (20*cur_int + ord(ch) - ord('A') + 1)
                 proof_ints.append(cur_int - 1)
@@ -275,7 +312,8 @@ class MM:
         subproofs = []
         prev_proofs = []
         for pf_int in proof_ints:
-            if pf_int == -1: subproofs.append(prev_proofs[-1])
+            if pf_int == -1:
+                subproofs.append(prev_proofs[-1])
             elif 0 <= pf_int and pf_int < hyp_end:
                 prev_proofs.append([pf_int])
                 decompressed_ints.append(pf_int)
@@ -292,9 +330,11 @@ class MM:
                                       for s in p] + [pf_int]
                         prev_proofs = prev_proofs[:-nshyps]
                         vprint(5, 'nshyps:', nshyps)
-                    else: new_prevpf = [pf_int]
+                    else:
+                        new_prevpf = [pf_int]
                     prev_proofs.append(new_prevpf)
-                else: prev_proofs.append([pf_int])
+                else:
+                    prev_proofs.append([pf_int])
             elif label_end <= pf_int:
                 pf = subproofs[pf_int - label_end]
                 vprint(5, 'expanded subpf:', pf)
@@ -307,7 +347,8 @@ class MM:
     def verify(self, stat_label, stat, proof):
         stack = []
         stat_type = stat[0]
-        if proof[0] == '(': proof = self.decompress_proof(stat, proof)
+        if proof[0] == '(':
+            proof = self.decompress_proof(stat, proof)
 
         for label in proof:
             steptyp, stepdat = self.labels[label]
@@ -318,7 +359,8 @@ class MM:
                 vprint(12, stepdat)
                 npop = len(mand_var) + len(hyp)
                 sp = len(stack) - npop
-                if sp < 0: raise MMError('stack underflow')
+                if sp < 0:
+                    raise MMError('stack underflow')
                 subst = {}
                 for (k, v) in mand_var:
                     entry = stack[sp]
@@ -345,17 +387,21 @@ class MM:
                     if entry != subst_h:
                         raise MMError(("stack entry {0!s} doesn't match " +
                                        "hypothesis {1!s}")
-                                       .format(entry, subst_h))
+                                      .format(entry, subst_h))
                     sp += 1
                 del stack[len(stack) - npop:]
                 stack.append(self.apply_subst(result, subst))
-            elif steptyp in ('$e', '$f'): stack.append(stepdat)
+            elif steptyp in ('$e', '$f'):
+                stack.append(stepdat)
 
             vprint(12, 'st:', stack)
-        if len(stack) != 1: raise MMError('stack has >1 entry at end')
-        if stack[0] != stat: raise MMError("assertion proved doesn't match")
+        if len(stack) != 1:
+            raise MMError('stack has >1 entry at end')
+        if stack[0] != stat:
+            raise MMError("assertion proved doesn't match")
 
     def dump(self): print(self.labels)
+
 
 if __name__ == '__main__':
     parser = OptionParser()
@@ -366,4 +412,4 @@ if __name__ == '__main__':
     (options, args) = parser.parse_args()
     mm = MM(options.begin_label, options.stop_label)
     mm.read(toks(sys.stdin))
-    #mm.dump()
+    # mm.dump()
