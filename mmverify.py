@@ -144,8 +144,8 @@ class FrameStack(list):
         frame.d.update(((min(x, y), max(x, y))
                         for x, y in itertools.product(stat, stat) if x != y))
 
-    def lookup_c(self, tok): return any((tok in fr.c for fr in reversed(self)))
-    def lookup_v(self, tok): return any((tok in fr.v for fr in reversed(self)))
+    def lookup_c(self, tok): return any((tok in fr.c for fr in self))
+    def lookup_v(self, tok): return any((tok in fr.v for fr in self))
 
     def lookup_f(self, var):
         for frame in reversed(self):
@@ -156,7 +156,7 @@ class FrameStack(list):
         raise MMKeyError(var)
 
     def lookup_d(self, x, y):
-        return any(((min(x, y), max(x, y)) in fr.d for fr in reversed(self)))
+        return any(((min(x, y), max(x, y)) in fr.d for fr in self))
 
     def lookup_e(self, stmt):
         stmt_t = tuple(stmt)
@@ -168,7 +168,6 @@ class FrameStack(list):
         raise MMKeyError(stmt_t)
 
     def make_assertion(self, stat):
-        frame = self[-1]
         e_hyps = [eh for fr in self for eh in fr.e]
         mand_vars = {tok for hyp in itertools.chain(e_hyps, [stat])
                      for tok in hyp if self.lookup_v(tok)}
@@ -344,9 +343,8 @@ class MM:
 
         return [labels[i] for i in decompressed_ints]
 
-    def verify(self, stat_label, stat, proof):
+    def verify(self, stat, proof):
         stack = []
-        stat_type = stat[0]
         if proof[0] == '(':
             proof = self.decompress_proof(stat, proof)
 
