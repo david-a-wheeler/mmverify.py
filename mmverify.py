@@ -212,14 +212,6 @@ class MM:
                 self.fs.add_f(stat[1], stat[0], label)
                 self.labels[label] = ('$f', [stat[0], stat[1]])
                 label = None
-            elif tok == '$a':
-                if not label:
-                    raise MMError('$a must have label')
-                if label == self.stop_label:
-                    sys.exit(0)
-                self.labels[label] = ('$a',
-                                      self.fs.make_assertion(toks.readstat()))
-                label = None
             elif tok == '$e':
                 if not label:
                     raise MMError('$e must have label')
@@ -227,11 +219,23 @@ class MM:
                 self.fs.add_e(stat, label)
                 self.labels[label] = ('$e', stat)
                 label = None
+            elif tok == '$a':
+                if not label:
+                    raise MMError('$a must have label')
+                if label == self.stop_label:
+                    sys.exit(0)
+                if label == self.begin_label:
+                    self.begin_label = None
+                self.labels[label] = ('$a',
+                                      self.fs.make_assertion(toks.readstat()))
+                label = None
             elif tok == '$p':
                 if not label:
                     raise MMError('$p must have label')
                 if label == self.stop_label:
                     sys.exit(0)
+                if label == self.begin_label:
+                    self.begin_label = None
                 stat = toks.readstat()
                 proof = None
                 try:
@@ -240,8 +244,6 @@ class MM:
                     stat = stat[:i]
                 except ValueError:
                     raise MMError('$p must contain a proof after $=')
-                if self.begin_label and label == self.begin_label:
-                    self.begin_label = None
                 if not self.begin_label:
                     vprint(1, 'verifying: ', label)
                     self.verify(stat, proof)
