@@ -62,7 +62,7 @@ class toks:
             filename = self.read()
             endbracket = self.read()
             if endbracket != '$]':
-                raise MMError('Incusion command not terminated')
+                raise MMError('Inclusion command not terminated')
             filename = os.path.realpath(filename)
             if filename not in self.imported_files:
                 self.lines_buf.append(open(filename, 'r'))
@@ -206,7 +206,7 @@ class MM:
                 if not label:
                     raise MMError('$f must have label')
                 if len(stat) != 2:
-                    raise MMError('$f must have be length 2')
+                    raise MMError('$f must have length 2')
                 vprint(15, label, '$f', stat[0], stat[1], '$.')
                 self.fs.add_f(stat[1], stat[0], label)
                 self.labels[label] = ('$f', [stat[0], stat[1]])
