@@ -76,7 +76,8 @@ class toks:
             if tok == '$(':
                 while tok != '$)':
                     tok = self.read()
-            return tok
+            else:
+                return tok
 
     def readstat(self):
         stat = []
@@ -243,7 +244,7 @@ class MM:
                     self.begin_label = None
                 if not self.begin_label:
                     vprint(1, 'verifying: ', label)
-                    self.verify(label, stat, proof)
+                    self.verify(stat, proof)
                 self.labels[label] = ('$p', self.fs.make_assertion(stat))
                 label = None
             elif tok == '$d':
@@ -347,7 +348,7 @@ class MM:
 
         for label in proof:
             steptyp, stepdat = self.labels[label]
-            vprint(10, label, ': ', self.labels[label])
+            vprint(10, label, ': ', steptyp, stepdat)
 
             if steptyp in ('$a', '$p'):
                 dvs, f_hyps, e_hyps, result = stepdat
