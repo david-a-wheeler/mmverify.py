@@ -184,6 +184,17 @@ class FrameStack(list):
         return (dvs, f_hyps, e_hyps, stat)
 
 
+def apply_subst(stat, subst):
+    result = []
+    for tok in stat:
+        if tok in subst:
+            result.extend(subst[tok])
+        else:
+            result.append(tok)
+    vprint(20, 'apply_subst: ', stat, subst, ' = ', result)
+    return result
+
+
 class MM:
     def __init__(self, begin_label, stop_label):
         self.fs = FrameStack()
@@ -259,16 +270,6 @@ class MM:
                 print('Unknown token: ', tok)
             tok = toks.readc()
         self.fs.pop()
-
-    def apply_subst(self, stat, subst):
-        result = []
-        for tok in stat:
-            if tok in subst:
-                result.extend(subst[tok])
-            else:
-                result.append(tok)
-        vprint(20, 'apply_subst: ', stat, subst, ' = ', result)
-        return result
 
     def find_vars(self, stat):
         vars = []
@@ -382,14 +383,14 @@ class MM:
                                     x, y))
                 for h in e_hyps:
                     entry = stack[sp]
-                    subst_h = self.apply_subst(h, subst)
+                    subst_h = apply_subst(h, subst)
                     if entry != subst_h:
                         raise MMError(("stack entry {0!s} does not match " +
                                        "essential hypothesis {1!s}")
                                       .format(entry, subst_h))
                     sp += 1
                 del stack[len(stack) - npop:]
-                stack.append(self.apply_subst(result, subst))
+                stack.append(apply_subst(result, subst))
             elif steptyp in ('$e', '$f'):
                 stack.append(stepdat)
 
