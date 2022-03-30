@@ -179,7 +179,7 @@ class FrameStack(list):
                     f_hyps.appendleft((k, v))
                     mand_vars.remove(v)
 
-        vprint(18, 'ma:', (dvs, f_hyps, e_hyps, stat))
+        vprint(18, 'make_assertion: ', dvs, f_hyps, e_hyps, stat)
         return (dvs, f_hyps, e_hyps, stat)
 
 
@@ -207,7 +207,7 @@ class MM:
                     raise MMError('$f must have label')
                 if len(stat) != 2:
                     raise MMError('$f must have length 2')
-                vprint(15, label, '$f', stat[0], stat[1], '$.')
+                vprint(15, label, '$f ', stat[0], stat[1], ' $.')
                 self.fs.add_f(stat[1], stat[0], label)
                 self.labels[label] = ('$f', [stat[0], stat[1]])
                 label = None
@@ -238,11 +238,11 @@ class MM:
                     proof = stat[i + 1:]
                     stat = stat[:i]
                 except ValueError:
-                    raise MMError('$p must contain proof after $=')
+                    raise MMError('$p must contain a proof after $=')
                 if self.begin_label and label == self.begin_label:
                     self.begin_label = None
                 if not self.begin_label:
-                    vprint(1, 'verifying', label)
+                    vprint(1, 'verifying: ', label)
                     self.verify(label, stat, proof)
                 self.labels[label] = ('$p', self.fs.make_assertion(stat))
                 label = None
@@ -253,7 +253,7 @@ class MM:
             elif tok[0] != '$':
                 label = tok
             else:
-                print('tok:', tok)
+                print('Unknown token: ', tok)
             tok = toks.readc()
         self.fs.pop()
 
@@ -264,7 +264,7 @@ class MM:
                 result.extend(subst[tok])
             else:
                 result.append(tok)
-        vprint(20, 'apply_subst', (stat, subst), '=', result)
+        vprint(20, 'apply_subst: ', stat, subst, ' = ', result)
         return result
 
     def find_vars(self, stat):
@@ -275,19 +275,19 @@ class MM:
         return vars
 
     def decompress_proof(self, stat, proof):
-        dm, mand_hyp_stmts, hyp_stmts, stat = self.fs.make_assertion(stat)
+        _, f_hyps, e_hyps, stat = self.fs.make_assertion(stat)
 
-        mand_hyps = [self.fs.lookup_f(v) for k, v in mand_hyp_stmts]
-        hyps = [self.fs.lookup_e(s) for s in hyp_stmts]
+        f_labels = [self.fs.lookup_f(v) for k, v in f_hyps]
+        e_labels = [self.fs.lookup_e(s) for s in e_hyps]
 
-        labels = mand_hyps + hyps
+        labels = f_labels + e_labels
         hyp_end = len(labels)
         ep = proof.index(')')
         labels += proof[1:ep]
         compressed_proof = ''.join(proof[ep + 1:])
 
-        vprint(5, 'labels:', labels)
-        vprint(5, 'proof:', compressed_proof)
+        vprint(5, 'labels: ', labels)
+        vprint(5, 'proof: ', compressed_proof)
 
         proof_ints = []
         cur_int = 0
@@ -301,7 +301,7 @@ class MM:
                 cur_int = 0
             elif 'U' <= ch and ch <= 'Y':
                 cur_int = (5 * cur_int + ord(ch) - ord('U') + 1)
-        vprint(5, 'proof_ints:', proof_ints)
+        vprint(5, 'proof_ints: ', proof_ints)
 
         label_end = len(labels)
         decompressed_ints = []
@@ -325,7 +325,7 @@ class MM:
                         new_prevpf = [s for p in prev_proofs[-nshyps:]
                                       for s in p] + [pf_int]
                         prev_proofs = prev_proofs[:-nshyps]
-                        vprint(5, 'nshyps:', nshyps)
+                        vprint(5, 'nshyps: ', nshyps)
                     else:
                         new_prevpf = [pf_int]
                     prev_proofs.append(new_prevpf)
@@ -333,10 +333,10 @@ class MM:
                     prev_proofs.append([pf_int])
             elif label_end <= pf_int:
                 pf = subproofs[pf_int - label_end]
-                vprint(5, 'expanded subpf:', pf)
+                vprint(5, 'expanded subpf: ', pf)
                 decompressed_ints += pf
                 prev_proofs.append(pf)
-        vprint(5, 'decompressed ints:', decompressed_ints)
+        vprint(5, 'decompressed ints: ', decompressed_ints)
 
         return [labels[i] for i in decompressed_ints]
 
@@ -347,41 +347,42 @@ class MM:
 
         for label in proof:
             steptyp, stepdat = self.labels[label]
-            vprint(10, label, ':', self.labels[label])
+            vprint(10, label, ': ', self.labels[label])
 
             if steptyp in ('$a', '$p'):
-                (distinct, mand_var, hyp, result) = stepdat
+                dvs, f_hyps, e_hyps, result = stepdat
                 vprint(12, stepdat)
-                npop = len(mand_var) + len(hyp)
+                npop = len(f_hyps) + len(e_hyps)
                 sp = len(stack) - npop
                 if sp < 0:
                     raise MMError('stack underflow')
                 subst = {}
-                for (k, v) in mand_var:
+                for (k, v) in f_hyps:
                     entry = stack[sp]
                     if entry[0] != k:
                         raise MMError(
-                            ("stack entry ({0}, {1}) doesn't match " +
-                             "mandatory var hyp {2!s}").format(k, v, entry))
+                            ("stack entry ({0}, {1}) does not match " +
+                             "floating hypothesis {2!s}").format(k, v, entry))
                     subst[v] = entry[1:]
                     sp += 1
-                vprint(15, 'subst:', subst)
-                for x, y in distinct:
-                    vprint(16, 'dist', x, y, subst[x], subst[y])
+                vprint(15, 'subst: ', subst)
+                for x, y in dvs:
+                    vprint(16, 'dist ', x, y, subst[x], subst[y])
                     x_vars = self.find_vars(subst[x])
                     y_vars = self.find_vars(subst[y])
-                    vprint(16, 'V(x) =', x_vars)
-                    vprint(16, 'V(y) =', y_vars)
+                    vprint(16, 'V(x) = ', x_vars)
+                    vprint(16, 'V(y) = ', y_vars)
                     for x, y in itertools.product(x_vars, y_vars):
                         if x == y or not self.fs.lookup_d(x, y):
-                            raise MMError("disjoint violation: {0}, {1}"
-                                          .format(x, y))
-                for h in hyp:
+                            raise MMError(
+                                "disjoint variable violation: {0}, {1}" .format(
+                                    x, y))
+                for h in e_hyps:
                     entry = stack[sp]
                     subst_h = self.apply_subst(h, subst)
                     if entry != subst_h:
-                        raise MMError(("stack entry {0!s} doesn't match " +
-                                       "hypothesis {1!s}")
+                        raise MMError(("stack entry {0!s} does not match " +
+                                       "essential hypothesis {1!s}")
                                       .format(entry, subst_h))
                     sp += 1
                 del stack[len(stack) - npop:]
@@ -389,11 +390,11 @@ class MM:
             elif steptyp in ('$e', '$f'):
                 stack.append(stepdat)
 
-            vprint(12, 'st:', stack)
+            vprint(12, 'stack: ', stack)
         if len(stack) != 1:
-            raise MMError('stack has >1 entry at end')
+            raise MMError('Stack has more than one entry at the end')
         if stack[0] != stat:
-            raise MMError("assertion proved doesn't match")
+            raise MMError("Assertion proved does not match")
 
     def dump(self): print(self.labels)
 
