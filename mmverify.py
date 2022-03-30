@@ -73,7 +73,7 @@ class toks:
     def readc(self):
         while 1:
             tok = self.readf()
-            if tok == None:
+            if tok is None:
                 return None
             if tok == '$(':
                 while tok != '$)':
@@ -85,7 +85,7 @@ class toks:
         stat = []
         tok = self.readc()
         while tok != '$.':
-            if tok == None:
+            if tok is None:
                 raise MMError('EOF before $.')
             stat.append(tok)
             tok = self.readc()
@@ -274,7 +274,7 @@ class MM:
     def find_vars(self, stat):
         vars = []
         for x in stat:
-            if not x in vars and self.fs.lookup_v(x):
+            if x not in vars and self.fs.lookup_v(x):
                 vars.append(x)
         return vars
 
@@ -288,7 +288,7 @@ class MM:
         hyp_end = len(labels)
         ep = proof.index(')')
         labels += proof[1:ep]
-        compressed_proof = ''.join(proof[ep+1:])
+        compressed_proof = ''.join(proof[ep + 1:])
 
         vprint(5, 'labels:', labels)
         vprint(5, 'proof:', compressed_proof)
@@ -300,11 +300,11 @@ class MM:
             if ch == 'Z':
                 proof_ints.append(-1)
             elif 'A' <= ch and ch <= 'T':
-                cur_int = (20*cur_int + ord(ch) - ord('A') + 1)
+                cur_int = (20 * cur_int + ord(ch) - ord('A') + 1)
                 proof_ints.append(cur_int - 1)
                 cur_int = 0
             elif 'U' <= ch and ch <= 'Y':
-                cur_int = (5*cur_int + ord(ch) - ord('U') + 1)
+                cur_int = (5 * cur_int + ord(ch) - ord('U') + 1)
         vprint(5, 'proof_ints:', proof_ints)
 
         label_end = len(labels)
