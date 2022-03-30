@@ -73,13 +73,10 @@ class toks:
     def readc(self):
         while 1:
             tok = self.readf()
-            if tok is None:
-                return None
             if tok == '$(':
                 while tok != '$)':
                     tok = self.read()
-            else:
-                return tok
+            return tok
 
     def readstat(self):
         stat = []
