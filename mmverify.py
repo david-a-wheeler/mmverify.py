@@ -297,7 +297,7 @@ class MM:
         return vars
 
     def decompress_proof(self, f_hyps, e_hyps, proof):
-        f_labels = [self.fs.lookup_f(v) for k, v in f_hyps]
+        f_labels = [self.fs.lookup_f(v) for _, v in f_hyps]
         e_labels = [self.fs.lookup_e(s) for s in e_hyps]
         labels = f_labels + e_labels
         hyp_end = len(labels)
@@ -330,7 +330,6 @@ class MM:
                 decompressed_ints.append(pf_int)
             elif hyp_end <= pf_int and pf_int < label_end:
                 decompressed_ints.append(pf_int)
-
                 step = self.labels[labels[pf_int]]
                 step_type, step_data = step[0], step[1]
                 if step_type in ('$a', '$p'):
@@ -369,7 +368,7 @@ class MM:
                 if sp < 0:
                     raise MMError('stack underflow')
                 subst = {}
-                for (k, v) in f_hyps0:
+                for k, v in f_hyps0:
                     entry = stack[sp]
                     if entry[0] != k:
                         raise MMError(
@@ -378,17 +377,6 @@ class MM:
                     subst[v] = entry[1:]
                     sp += 1
                 vprint(15, 'subst:', subst)
-                for x, y in dvs0:
-                    vprint(16, 'dist', x, y, subst[x], subst[y])
-                    x_vars = self.find_vars(subst[x])
-                    y_vars = self.find_vars(subst[y])
-                    vprint(16, 'V(x) =', x_vars)
-                    vprint(16, 'V(y) =', y_vars)
-                    for x, y in itertools.product(x_vars, y_vars):
-                        if x == y or not self.fs.lookup_d(x, y):
-                            raise MMError(
-                                "disjoint variable violation: {0}, {1}" .format(
-                                    x, y))
                 for h in e_hyps0:
                     entry = stack[sp]
 # comment either the following four lines, or the next five lines
@@ -402,6 +390,16 @@ class MM:
                                        "essential hypothesis {1!s}")
                                       .format(entry, subst_h))
                     sp += 1
+                for x, y in dvs0:
+                    vprint(16, 'dist', x, y, subst[x], subst[y])
+                    x_vars = self.find_vars(subst[x])
+                    y_vars = self.find_vars(subst[y])
+                    vprint(16, 'V(x) =', x_vars)
+                    vprint(16, 'V(y) =', y_vars)
+                    for x, y in itertools.product(x_vars, y_vars):
+                        if x == y or not self.fs.lookup_d(x, y):
+                            raise MMError(
+                                "disjoint violation: {0}, {1}" .format(x, y))
                 del stack[len(stack) - npop:]
                 stack.append(apply_subst(conclusion0, subst))
             elif steptyp in ('$e', '$f'):
