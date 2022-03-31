@@ -5,7 +5,7 @@
 # it under the terms of the GNU General Public License
 
 # To run the program, type
-#   $ python3 mmverify.py < set.mm 2> set.log
+#   $ python3 mmverify.py set.mm 2> set.log
 # and set.log will have the verification results.
 # To get help on the program usage, type
 #   $ python3 mmverify.py -h
@@ -403,15 +403,15 @@ class MM:
                 for h in e_hyps0:
                     entry = stack[sp]
 # comment either the following four lines, or the next five lines
-                    if not equal_subst(h, subst, entry):
-                        raise MMError(("stack entry {0!s} does not match " +
-                                       "essential hypothesis {1!s}")
-                                      .format(entry, apply_subst(h, subst)))
-#                    subst_h = apply_subst(h, subst)
-#                    if entry != subst_h:
+#                    if not equal_subst(h, subst, entry):
 #                        raise MMError(("stack entry {0!s} does not match " +
 #                                       "essential hypothesis {1!s}")
-#                                      .format(entry, subst_h))
+#                                      .format(entry, apply_subst(h, subst)))
+                    subst_h = apply_subst(h, subst)
+                    if entry != subst_h:
+                        raise MMError(("stack entry {0!s} does not match " +
+                                       "essential hypothesis {1!s}")
+                                      .format(entry, subst_h))
                     sp += 1
                 del stack[len(stack) - npop:]
                 stack.append(apply_subst(conclusion0, subst))
