@@ -7,6 +7,8 @@
 # To run the program, type
 #   $ python3 mmverify.py < set.mm 2> set.log
 # and set.log will have the verification results.
+# To get help on the program usage, type
+#   $ python3 mmverify.py -h
 
 # (nm 27-Jun-2005) mmverify.py requires that a $f hypothesis must not occur
 # after a $e hypothesis in the same scope, even though this is allowed by
@@ -21,8 +23,6 @@ import itertools
 import collections
 import os.path
 import argparse
-
-verbosity = 1
 
 
 class MMError(Exception):
@@ -429,11 +429,35 @@ class MM:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Verify a Metamth database.')
-    parser.add_argument('-b', '--begin-label', dest='begin_label',
-                        help='label to begin verifying (included)')
-    parser.add_argument('-s', '--stop-label', dest='stop_label',
-                        help='label to stop verifying (not included)')
+    parser.add_argument(
+        '-v',
+        '--verbosity',
+        dest='verbosity',
+        default=0,
+        type=int,
+        help='verbosity level')
+    parser.add_argument(
+        'file',
+        nargs='?',
+        type=argparse.FileType(
+            'r',
+            encoding='ascii'),
+        default=sys.stdin,
+        help='file to verify')
+    parser.add_argument(
+        '-b',
+        '--begin-label',
+        dest='begin_label',
+        type=str,
+        help='assertion label where to begin verifying (included)')
+    parser.add_argument(
+        '-s',
+        '--stop-label',
+        dest='stop_label',
+        type=str,
+        help='assertion label where to stop verifying (not included)')
     args = parser.parse_args()
+    verbosity = args.verbosity
     mm = MM(args.begin_label, args.stop_label)
-    mm.read(toks(sys.stdin))
+    mm.read(toks(args.file))
     # mm.dump()
