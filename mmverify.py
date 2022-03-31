@@ -20,7 +20,6 @@
 
 import sys
 import itertools
-import collections
 import os.path
 import argparse
 
@@ -143,6 +142,7 @@ class FrameStack(list):
                         for x, y in itertools.product(stat, stat) if x != y))
 
     def lookup_c(self, tok): return any((tok in fr.c for fr in self))
+
     def lookup_v(self, tok): return any((tok in fr.v for fr in self))
 
     def lookup_d(self, x, y):
@@ -169,17 +169,14 @@ class FrameStack(list):
         e_hyps = [eh for fr in self for eh in fr.e]
         mand_vars = {tok for hyp in itertools.chain(e_hyps, [stat])
                      for tok in hyp if self.lookup_v(tok)}
-
         dvs = {(x, y) for fr in self for (x, y) in
                fr.d.intersection(itertools.product(mand_vars, mand_vars))}
-
-        f_hyps = collections.deque()
-        for fr in reversed(self):
-            for v, k in reversed(fr.f):
+        f_hyps = []
+        for fr in self:
+            for v, k in fr.f:
                 if v in mand_vars:
-                    f_hyps.appendleft((k, v))
+                    f_hyps.append((k, v))
                     mand_vars.remove(v)
-
         vprint(18, 'make_assertion:', dvs, f_hyps, e_hyps, stat)
         return (dvs, f_hyps, e_hyps, stat)
 
@@ -302,19 +299,15 @@ class MM:
     def decompress_proof(self, f_hyps, e_hyps, proof):
         f_labels = [self.fs.lookup_f(v) for k, v in f_hyps]
         e_labels = [self.fs.lookup_e(s) for s in e_hyps]
-
         labels = f_labels + e_labels
         hyp_end = len(labels)
         ep = proof.index(')')
         labels += proof[1:ep]
         compressed_proof = ''.join(proof[ep + 1:])
-
         vprint(5, 'labels:', labels)
         vprint(5, 'proof:', compressed_proof)
-
         proof_ints = []
         cur_int = 0
-
         for ch in compressed_proof:
             if ch == 'Z':
                 proof_ints.append(-1)
@@ -325,7 +318,6 @@ class MM:
             elif 'U' <= ch and ch <= 'Y':
                 cur_int = (5 * cur_int + ord(ch) - ord('U') + 1)
         vprint(5, 'proof_ints:', proof_ints)
-
         label_end = len(labels)
         decompressed_ints = []
         subproofs = []
@@ -360,18 +352,15 @@ class MM:
                 decompressed_ints += pf
                 prev_proofs.append(pf)
         vprint(5, 'decompressed ints:', decompressed_ints)
-
         return [labels[i] for i in decompressed_ints]
 
     def verify(self, f_hyps, e_hyps, conclusion, proof):
         stack = []
         if proof[0] == '(':
             proof = self.decompress_proof(f_hyps, e_hyps, proof)
-
         for label in proof:
             steptyp, stepdat = self.labels[label]
             vprint(10, label, ':', steptyp, stepdat)
-
             if steptyp in ('$a', '$p'):
                 dvs0, f_hyps0, e_hyps0, conclusion0 = stepdat
                 vprint(12, stepdat)
@@ -417,7 +406,6 @@ class MM:
                 stack.append(apply_subst(conclusion0, subst))
             elif steptyp in ('$e', '$f'):
                 stack.append(stepdat)
-
             vprint(12, 'stack:', stack)
         if len(stack) != 1:
             raise MMError('Stack has more than one entry at the end')
@@ -443,7 +431,7 @@ if __name__ == '__main__':
             'r',
             encoding='ascii'),
         default=sys.stdin,
-        help='file to verify')
+        help='file to verify (defaults to stdin)')
     parser.add_argument(
         '-b',
         '--begin-label',
