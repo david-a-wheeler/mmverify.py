@@ -378,7 +378,7 @@ class MM:
         vprint(5, 'proof_ints:', proof_ints)
         label_end = len(labels)
         decompressed_ints = []
-        subproofs = []
+        subproofs = []  # proofs that are referenced later (marked by a 'Z')
         prev_proofs = []
         for pf_int in proof_ints:
             if pf_int == -1:
