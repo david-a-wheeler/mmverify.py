@@ -186,7 +186,7 @@ class FrameStack(list):
         return any((tok in fr.c for fr in self))
 
     def lookup_v(self, tok):
-        """Return whether the given token was defined as a constant in the
+        """Return whether the given token was defined as a variable in the
         current scope.
         """
         return any((tok in fr.v for fr in self))
