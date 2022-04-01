@@ -35,17 +35,26 @@ class MMKeyError(MMError, KeyError):
 
 
 def vprint(vlevel, *args):
+    """Print log message if verbosity level is higher than the argument."""
     if verbosity >= vlevel:
         print(*args, file=logfile)
 
 
 class toks:
+    """Class of sets of tokens from which functions read as in an input
+    stream.
+    """
+
     def __init__(self, lines):
+        """Construct a toks with the given list of lines, an empty tokbuf
+        list, and an empty set of names of imported files.
+        """
         self.lines_buf = [lines]
         self.tokbuf = []
         self.imported_files = set()
 
     def read(self):
+        """Read the next token."""
         while self.tokbuf == []:
             line = self.lines_buf[-1].readline()
             if not line:
@@ -58,6 +67,10 @@ class toks:
         return self.tokbuf.pop()
 
     def readf(self):
+        """Read the next token once included files have been expanded.  In the
+        latter case, the name of the expanded file is added to a list so as to
+        avoid multiple imports.
+        """
         tok = self.read()
         while tok == '$[':
             filename = self.read()
@@ -72,6 +85,9 @@ class toks:
         return tok
 
     def readc(self):
+        """Read the next token once included files have been expanded and
+        ignoring comments.
+        """
         while 1:
             tok = self.readf()
             if tok == '$(':
@@ -81,6 +97,10 @@ class toks:
                 return tok
 
     def readstat(self):
+        """Read tokens from the input (assumed to be at the beginning of a
+        statement) and return the list of tokens until the next end-statement
+        token '$.'.
+        """
         stat = []
         tok = self.readc()
         while tok != '$.':
@@ -92,7 +112,10 @@ class toks:
 
 
 class Frame:
+    """Class of frames, keeping track of the environment."""
+
     def __init__(self):
+        """Construct an empty frame."""
         self.c = set()
         self.v = set()
         self.d = set()
@@ -103,26 +126,34 @@ class Frame:
 
 
 class FrameStack(list):
+    """Class of frame stacks, which extends lists (considered and used as
+    stacks).
+    """
+
     def push(self):
+        """Push an empty frame to the stack."""
         self.append(Frame())
 
     def add_c(self, tok):
-        frame = self[-1]
-        if tok in frame.c:
+        """Add a constant to the frame stack top.  Allow local definitions."""
+        if self.lookup_c(tok):
             raise MMError('const already defined in scope')
-        if tok in frame.v:
+        if self.lookup_v(tok):
             raise MMError('const already defined as var in scope')
-        frame.c.add(tok)
+        self[-1].c.add(tok)
 
     def add_v(self, tok):
-        frame = self[-1]
-        if tok in frame.v:
+        """Add a variable to the frame stack top.  Allow local definitions."""
+        if self.lookup_v(tok):
             raise MMError('var already defined in scope')
-        if tok in frame.c:
+        if self.lookup_c(tok):
             raise MMError('var already defined as const in scope')
-        frame.v.add(tok)
+        self[-1].v.add(tok)
 
     def add_f(self, var, kind, label):
+        """Add a floating hypothesis (ordered pair (variable, kind)) to the
+        frame stack top.
+        """
         if not self.lookup_v(var):
             raise MMError('var in $f not defined: {0}'.format(var))
         if not self.lookup_c(kind):
@@ -134,23 +165,42 @@ class FrameStack(list):
         frame.f_labels[var] = label
 
     def add_e(self, stat, label):
+        """Add an essential hypothesis (token tuple) to the frame stack
+        top.
+        """
         frame = self[-1]
         frame.e.append(stat)
         frame.e_labels[tuple(stat)] = label
 
     def add_d(self, stat):
-        frame = self[-1]
-        frame.d.update(((min(x, y), max(x, y))
-                        for x, y in itertools.product(stat, stat) if x != y))
+        """Add a disjoint variable condition (ordered pair of variables) to
+        the frame stack top.
+        """
+        self[-1].d.update(((min(x, y), max(x, y))
+                           for x, y in itertools.product(stat, stat) if x != y))
 
-    def lookup_c(self, tok): return any((tok in fr.c for fr in self))
+    def lookup_c(self, tok):
+        """Return whether the given token was defined as a constant in the
+        current scope.
+        """
+        return any((tok in fr.c for fr in self))
 
-    def lookup_v(self, tok): return any((tok in fr.v for fr in self))
+    def lookup_v(self, tok):
+        """Return whether the given token was defined as a constant in the
+        current scope.
+        """
+        return any((tok in fr.v for fr in self))
 
     def lookup_d(self, x, y):
+        """Return whether the given ordered pair of variables has a disjoint
+        variable condition in the current scope.
+        """
         return any(((min(x, y), max(x, y)) in fr.d for fr in self))
 
     def lookup_f(self, var):
+        """Return the label of the latest floating hypothesis which types the
+        given variable.
+        """
         for frame in reversed(self):
             try:
                 return frame.f_labels[var]
@@ -159,6 +209,9 @@ class FrameStack(list):
         raise MMKeyError(var)
 
     def lookup_e(self, stmt):
+        """Return the label of the latest essential hypothesis with the given
+        statement.
+        """
         stmt_t = tuple(stmt)
         for frame in reversed(self):
             try:
@@ -168,6 +221,9 @@ class FrameStack(list):
         raise MMKeyError(stmt_t)
 
     def make_assertion(self, stat):
+        """Return a quadruple (dv conditions, floating hypotheses, essential
+        hypotheses, conclusion) describing the given assertion.
+        """
         e_hyps = [eh for fr in self for eh in fr.e]
         mand_vars = {tok for hyp in itertools.chain(e_hyps, [stat])
                      for tok in hyp if self.lookup_v(tok)}
@@ -184,6 +240,9 @@ class FrameStack(list):
 
 
 def apply_subst(stat, subst):
+    """Return the token list resulting from the given substitution
+    (dictionary) applied to the given statement (token list).
+    """
     result = []
     for tok in stat:
         if tok in subst:
@@ -195,13 +254,19 @@ def apply_subst(stat, subst):
 
 
 class MM:
+    """Class of ("abstract syntax trees" describing) Metamath databases."""
+
     def __init__(self, begin_label, stop_label):
+        """Construct an empty Metamath database."""
         self.fs = FrameStack()
         self.labels = {}
         self.begin_label = begin_label
         self.stop_label = stop_label
 
     def read(self, toks):
+        """Read the given token list to update the database and verify its
+        proofs.
+        """
         self.fs.push()
         label = None
         tok = toks.readc()
@@ -272,6 +337,7 @@ class MM:
         self.fs.pop()
 
     def find_vars(self, stat):
+        """Return the list of variables in the given statement."""
         vars = []
         for x in stat:
             if x not in vars and self.fs.lookup_v(x):
@@ -279,6 +345,9 @@ class MM:
         return vars
 
     def decompress_proof(self, f_hyps, e_hyps, proof):
+        """Return the proof in normal format corresponding the given proof in
+        compressed format of the given statement.
+        """
         f_labels = [self.fs.lookup_f(v) for _, v in f_hyps]
         e_labels = [self.fs.lookup_e(s) for s in e_hyps]
         labels = f_labels + e_labels
@@ -294,13 +363,10 @@ class MM:
             if ch == 'Z':
                 proof_ints.append(-1)
             elif 'A' <= ch and ch <= 'T':
-                # cur_int = (20 * cur_int + ord(ch) - ord('A') + 1)
-                # proof_ints.append(cur_int - 1)
-                proof_ints.append(20 * cur_int + ord(ch) - 65)
+                proof_ints.append(20 * cur_int + ord(ch) - 65)  # ord('A') = 65
                 cur_int = 0
-            else:  # elif 'U' <= ch and ch <= 'Y':
-                # cur_int = (5 * cur_int + ord(ch) - ord('U') + 1)
-                cur_int = (5 * cur_int + ord(ch) - 84)
+            else:  # 'U' <= ch and ch <= 'Y'
+                cur_int = 5 * cur_int + ord(ch) - 84  # ord('U') = 85
         vprint(5, 'proof_ints:', proof_ints)
         label_end = len(labels)
         decompressed_ints = []
@@ -328,7 +394,7 @@ class MM:
                     else:
                         new_prevpf = [pf_int]
                     prev_proofs.append(new_prevpf)
-            elif label_end <= pf_int:
+            elif label_end <= pf_int:  # pf_int points to earlier proof step pf
                 pf = subproofs[pf_int - label_end]
                 vprint(5, 'expanded subpf:', pf)
                 decompressed_ints += pf
@@ -337,6 +403,9 @@ class MM:
         return [labels[i] for i in decompressed_ints]
 
     def verify(self, f_hyps, e_hyps, conclusion, proof):
+        """Verify that the given proof is a correct proof of the given
+        statement in the object database.
+        """
         stack = []
         if proof[0] == '(':
             proof = self.decompress_proof(f_hyps, e_hyps, proof)
@@ -388,19 +457,22 @@ class MM:
         if stack[0] != conclusion:
             raise MMError("Assertion proved does not match")
 
-    def dump(self): print(self.labels)
+    def dump(self):
+        """Print the labels of the database."""
+        print(self.labels)
 
 
 if __name__ == '__main__':
+    """Parse the arguments and verify the given Metamath database."""
     parser = argparse.ArgumentParser(description='Verify a Metamath database.')
     parser.add_argument(
-        'file',
+        'database',
         nargs='?',
         type=argparse.FileType(
             'r',
             encoding='ascii'),
         default=sys.stdin,
-        help='file to verify (defaults to stdin)')
+        help='database (file) to verify (defaults to stdin)')
     parser.add_argument(
         '-l',
         '--logfile',
@@ -422,7 +494,7 @@ if __name__ == '__main__':
         '--begin-label',
         dest='begin_label',
         type=str,
-        help='assertion label where to begin verifying (included)')
+        help='assertion label where to begin verifying (included if $p)')
     parser.add_argument(
         '-s',
         '--stop-label',
@@ -431,7 +503,8 @@ if __name__ == '__main__':
         help='assertion label where to stop verifying (not included)')
     args = parser.parse_args()
     verbosity = args.verbosity
+    database = args.database
     logfile = args.logfile
     mm = MM(args.begin_label, args.stop_label)
-    mm.read(toks(args.file))
+    mm.read(toks(database))
     # mm.dump()
