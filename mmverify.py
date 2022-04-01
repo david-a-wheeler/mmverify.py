@@ -159,7 +159,10 @@ class FrameStack(list):
         if not self.lookup_c(kind):
             raise MMError('const in $f not defined {0}'.format(kind))
         frame = self[-1]
-        if var in frame.f_labels.keys():
+        # The following line forbids multiple $f-statements for a given var.
+        # If that restriction is removed, then 'make_assertion' should be
+        # changed accordingly with the comment there.
+        if any(var in fr.f_labels.keys() for fr in self):
             raise MMError('var in $f already defined in scope')
         frame.f.append((var, kind))
         frame.f_labels[var] = label
@@ -176,26 +179,26 @@ class FrameStack(list):
         """Add a disjoint variable condition (ordered pair of variables) to
         the frame stack top.
         """
-        self[-1].d.update(((min(x, y), max(x, y))
-                           for x, y in itertools.product(stat, stat) if x != y))
+        self[-1].d.update((min(x, y), max(x, y))
+                          for x, y in itertools.product(stat, stat) if x != y)
 
     def lookup_c(self, tok):
         """Return whether the given token was defined as a constant in the
         current scope.
         """
-        return any((tok in fr.c for fr in self))
+        return any(tok in fr.c for fr in self)
 
     def lookup_v(self, tok):
         """Return whether the given token was defined as a variable in the
         current scope.
         """
-        return any((tok in fr.v for fr in self))
+        return any(tok in fr.v for fr in self)
 
     def lookup_d(self, x, y):
         """Return whether the given ordered pair of variables has a disjoint
         variable condition in the current scope.
         """
-        return any(((min(x, y), max(x, y)) in fr.d for fr in self))
+        return any((min(x, y), max(x, y)) in fr.d for fr in self)
 
     def lookup_f(self, var):
         """Return the label of the latest floating hypothesis which types the
@@ -230,6 +233,10 @@ class FrameStack(list):
         dvs = {(x, y) for fr in self for (x, y) in
                fr.d.intersection(itertools.product(mand_vars, mand_vars))}
         f_hyps = []
+        # If one allows Metamath databases with multiple $f-statements for a
+        # given var, then one should use "reversed" in the next two lines to
+        # get the latest f_hyp corresponding to the given var.
+        # The current 'add_f' forbids such multiple $f-statements.
         for fr in self:
             for v, k in fr.f:
                 if v in mand_vars:
