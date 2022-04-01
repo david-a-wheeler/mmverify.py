@@ -234,9 +234,10 @@ class FrameStack(list):
                fr.d.intersection(itertools.product(mand_vars, mand_vars))}
         f_hyps = []
         # If one allows Metamath databases with multiple $f-statements for a
-        # given var, then one should use "reversed" in the next two lines to
-        # get the latest f_hyp corresponding to the given var.
-        # The current 'add_f' forbids such multiple $f-statements.
+        # given var, then one should use "reversed" in the next two lines and
+        # use 'appendleft' from 'collections.deque' to get the latest f_hyp
+        # corresponding to the given var.
+        # The current version of 'add_f' forbids such multiple $f-statements.
         for fr in self:
             for v, k in fr.f:
                 if v in mand_vars:
