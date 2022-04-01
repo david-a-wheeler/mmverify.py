@@ -5,7 +5,9 @@
 # it under the terms of the GNU General Public License
 
 # To run the program, type
-#   $ python3 mmverify.py set.mm 2> set.log
+#   $ python3 mmverify.py set.mm --logfile set.log
+# or (using bash redirections)
+#   $ python3 mmverify.py < set.mm 2> set.log
 # and set.log will have the verification results.
 # To get help on the program usage, type
 #   $ python3 mmverify.py -h
@@ -34,7 +36,7 @@ class MMKeyError(MMError, KeyError):
 
 def vprint(vlevel, *args):
     if verbosity >= vlevel:
-        print(*args, file=sys.stderr)
+        print(*args, file=logfile)
 
 
 class toks:
@@ -185,31 +187,11 @@ def apply_subst(stat, subst):
     result = []
     for tok in stat:
         if tok in subst:
-            result.extend(subst[tok])
+            result += subst[tok]
         else:
             result.append(tok)
     vprint(20, 'apply_subst:', stat, subst, '=', result)
     return result
-
-
-# Return whether stmt2 is the result of applying subst to stmt1
-# Faster than 'stmt2 == apply_subst(stmt1, subst)' since it does not
-# build the latter.
-# Note: seems to give 0.5% slower runs...
-def equal_subst(stmt1, subst, stmt2):
-    i = 0
-    for tok in stmt1:
-        if tok in subst:
-            substmt = subst[tok]
-            length = len(substmt)
-            if stmt2[i:i + length] != substmt:
-                return False
-            i += length
-        else:
-            if stmt2[i] != tok:
-                return False
-            i += 1
-    return i == len(stmt2)
 
 
 class MM:
@@ -312,11 +294,13 @@ class MM:
             if ch == 'Z':
                 proof_ints.append(-1)
             elif 'A' <= ch and ch <= 'T':
-                cur_int = (20 * cur_int + ord(ch) - ord('A') + 1)
-                proof_ints.append(cur_int - 1)
+                # cur_int = (20 * cur_int + ord(ch) - ord('A') + 1)
+                # proof_ints.append(cur_int - 1)
+                proof_ints.append(20 * cur_int + ord(ch) - 65)
                 cur_int = 0
-            elif 'U' <= ch and ch <= 'Y':
-                cur_int = (5 * cur_int + ord(ch) - ord('U') + 1)
+            else:  # elif 'U' <= ch and ch <= 'Y':
+                # cur_int = (5 * cur_int + ord(ch) - ord('U') + 1)
+                cur_int = (5 * cur_int + ord(ch) - 84)
         vprint(5, 'proof_ints:', proof_ints)
         label_end = len(labels)
         decompressed_ints = []
@@ -330,11 +314,12 @@ class MM:
                 decompressed_ints.append(pf_int)
             elif hyp_end <= pf_int and pf_int < label_end:
                 decompressed_ints.append(pf_int)
-                step = self.labels[labels[pf_int]]
-                step_type, step_data = step[0], step[1]
-                if step_type in ('$a', '$p'):
-                    _, svars, shyps, _ = step_data
-                    nshyps = len(shyps) + len(svars)
+                steptyp, stepdat = self.labels[labels[pf_int]]
+                if steptyp in ('$e', '$f'):
+                    prev_proofs.append([pf_int])
+                elif steptyp in ('$a', '$p'):
+                    _, f_hyps0, e_hyps0, _ = stepdat
+                    nshyps = len(f_hyps0) + len(e_hyps0)
                     if nshyps != 0:
                         new_prevpf = [s for p in prev_proofs[-nshyps:]
                                       for s in p] + [pf_int]
@@ -343,8 +328,6 @@ class MM:
                     else:
                         new_prevpf = [pf_int]
                     prev_proofs.append(new_prevpf)
-                else:
-                    prev_proofs.append([pf_int])
             elif label_end <= pf_int:
                 pf = subproofs[pf_int - label_end]
                 vprint(5, 'expanded subpf:', pf)
@@ -360,7 +343,9 @@ class MM:
         for label in proof:
             steptyp, stepdat = self.labels[label]
             vprint(10, label, ':', steptyp, stepdat)
-            if steptyp in ('$a', '$p'):
+            if steptyp in ('$e', '$f'):
+                stack.append(stepdat)
+            elif steptyp in ('$a', '$p'):
                 dvs0, f_hyps0, e_hyps0, conclusion0 = stepdat
                 vprint(12, stepdat)
                 npop = len(f_hyps0) + len(e_hyps0)
@@ -379,11 +364,6 @@ class MM:
                 vprint(15, 'subst:', subst)
                 for h in e_hyps0:
                     entry = stack[sp]
-# comment either the following four lines, or the next five lines
-#                    if not equal_subst(h, subst, entry):
-#                        raise MMError(("stack entry {0!s} does not match " +
-#                                       "essential hypothesis {1!s}")
-#                                      .format(entry, apply_subst(h, subst)))
                     subst_h = apply_subst(h, subst)
                     if entry != subst_h:
                         raise MMError(("stack entry {0!s} does not match " +
@@ -402,8 +382,6 @@ class MM:
                                 "disjoint violation: {0}, {1}" .format(x, y))
                 del stack[len(stack) - npop:]
                 stack.append(apply_subst(conclusion0, subst))
-            elif steptyp in ('$e', '$f'):
-                stack.append(stepdat)
             vprint(12, 'stack:', stack)
         if len(stack) != 1:
             raise MMError('Stack has more than one entry at the end')
@@ -414,14 +392,7 @@ class MM:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Verify a Metamth database.')
-    parser.add_argument(
-        '-v',
-        '--verbosity',
-        dest='verbosity',
-        default=0,
-        type=int,
-        help='verbosity level')
+    parser = argparse.ArgumentParser(description='Verify a Metamath database.')
     parser.add_argument(
         'file',
         nargs='?',
@@ -430,6 +401,22 @@ if __name__ == '__main__':
             encoding='ascii'),
         default=sys.stdin,
         help='file to verify (defaults to stdin)')
+    parser.add_argument(
+        '-l',
+        '--logfile',
+        dest='logfile',
+        type=argparse.FileType(
+            'w',
+            encoding='ascii'),
+        default=sys.stderr,
+        help='file to output logs (defaults to stderr)')
+    parser.add_argument(
+        '-v',
+        '--verbosity',
+        dest='verbosity',
+        default=0,
+        type=int,
+        help='verbosity level')
     parser.add_argument(
         '-b',
         '--begin-label',
@@ -444,6 +431,7 @@ if __name__ == '__main__':
         help='assertion label where to stop verifying (not included)')
     args = parser.parse_args()
     verbosity = args.verbosity
+    logfile = args.logfile
     mm = MM(args.begin_label, args.stop_label)
     mm.read(toks(args.file))
     # mm.dump()
