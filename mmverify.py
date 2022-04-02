@@ -351,21 +351,76 @@ class MM:
                 vars.append(x)
         return vars
 
-    def decompress_proof(self, f_hyps, e_hyps, proof):
-        """Return the proof in normal format corresponding the given proof in
-        compressed format of the given statement.
+    def step(self, step, stack):
+        """Carry out the given proof step (given the label to treat and the
+        current proof stack).  This modifies the given stack in place.
+        """
+        steptyp, stepdat = step
+        vprint(10, 'step', steptyp, stepdat)
+        if steptyp in ('$e', '$f'):
+            stack.append(stepdat)
+        elif steptyp in ('$a', '$p'):
+            dvs0, f_hyps0, e_hyps0, conclusion0 = stepdat
+            vprint(12, stepdat)
+            npop = len(f_hyps0) + len(e_hyps0)
+            sp = len(stack) - npop
+            if sp < 0:
+                raise MMError('stack underflow')
+            subst = {}
+            for k, v in f_hyps0:
+                entry = stack[sp]
+                if entry[0] != k:
+                    raise MMError(
+                        ("stack entry {2!s} does not match floating " +
+                             "hypothesis ({0}, {1})").format(entry, k, v))
+                subst[v] = entry[1:]
+                sp += 1
+            vprint(15, 'subst:', subst)
+            for h in e_hyps0:
+                entry = stack[sp]
+                subst_h = apply_subst(h, subst)
+                if entry != subst_h:
+                    raise MMError(("stack entry {0!s} does not match " +
+                                   "essential hypothesis {1!s}")
+                                      .format(entry, subst_h))
+                sp += 1
+            for x, y in dvs0:
+                vprint(16, 'dist', x, y, subst[x], subst[y])
+                x_vars = self.find_vars(subst[x])
+                y_vars = self.find_vars(subst[y])
+                vprint(16, 'V(x) =', x_vars)
+                vprint(16, 'V(y) =', y_vars)
+                for x, y in itertools.product(x_vars, y_vars):
+                    if x == y or not self.fs.lookup_d(x, y):
+                        raise MMError("Disjoint variable violation: " +
+                                          "{0} , {1}".format(x, y))
+            del stack[len(stack) - npop:]
+            stack.append(apply_subst(conclusion0, subst))
+        vprint(12, 'stack:', stack)
+
+    def treat_normal_proof(self, proof):
+        """Return the proof stack once the given normal proof has been
+        processed.
+        """
+        stack = []
+        for label in proof:
+            self.step(self.labels[label], stack)
+        return stack
+
+    def treat_compressed_proof(self, f_hyps, e_hyps, proof):
+        """Return the proof stack once the given compressed proof for an
+        assertion with the given $f and $e-hypotheses has been processed.
         """
         f_labels = [self.fs.lookup_f(v) for _, v in f_hyps]
         e_labels = [self.fs.lookup_e(s) for s in e_hyps]
-        labels = f_labels + e_labels
-        hyp_end = len(labels)
-        ep = proof.index(')')
-        labels += proof[1:ep]
-        compressed_proof = ''.join(proof[ep + 1:])
+        labels = f_labels + e_labels  # labels of implicit hypotheses
+        idx_bloc = proof.index(')')  # index of end of label bloc
+        labels += proof[1:idx_bloc]  # labels which will be referenced later
+        compressed_proof = ''.join(proof[idx_bloc + 1:])
         vprint(5, 'labels:', labels)
         vprint(5, 'proof:', compressed_proof)
-        proof_ints = []
-        cur_int = 0
+        proof_ints = []  # integers referencing the labels in 'labels'
+        cur_int = 0  #  counter for radix conversion
         for ch in compressed_proof:
             if ch == 'Z':
                 proof_ints.append(-1)
@@ -376,95 +431,37 @@ class MM:
                 cur_int = 5 * cur_int + ord(ch) - 84  # ord('U') = 85
         vprint(5, 'proof_ints:', proof_ints)
         label_end = len(labels)
-        decompressed_ints = []
-        subproofs = []  # proofs that are referenced later (marked by a 'Z')
-        prev_proofs = []
+        saved_stmts = [] # statements saved for later reuse (marked with a 'Z')
+        stack = []  # proof stack
         for pf_int in proof_ints:
+            vprint(10, 'stack:', stack)
             if pf_int == -1:
-                subproofs.append(prev_proofs[-1])
-            elif 0 <= pf_int and pf_int < hyp_end:
-                prev_proofs.append([pf_int])
-                decompressed_ints.append(pf_int)
-            elif hyp_end <= pf_int and pf_int < label_end:
-                decompressed_ints.append(pf_int)
-                steptyp, stepdat = self.labels[labels[pf_int]]
-                if steptyp in ('$e', '$f'):
-                    prev_proofs.append([pf_int])
-                elif steptyp in ('$a', '$p'):
-                    _, f_hyps0, e_hyps0, _ = stepdat
-                    nshyps = len(f_hyps0) + len(e_hyps0)
-                    if nshyps != 0:
-                        new_prevpf = [s for p in prev_proofs[-nshyps:]
-                                      for s in p] + [pf_int]
-                        prev_proofs = prev_proofs[:-nshyps]
-                        vprint(5, 'nshyps:', nshyps)
-                    else:
-                        new_prevpf = [pf_int]
-                    prev_proofs.append(new_prevpf)
-            elif label_end <= pf_int:  # pf_int points to earlier proof step pf
-                pf = subproofs[pf_int - label_end]
-                vprint(5, 'expanded subpf:', pf)
-                decompressed_ints += pf
-                prev_proofs.append(pf)
-        vprint(5, 'decompressed ints:', decompressed_ints)
-        return [labels[i] for i in decompressed_ints]
+                # this means we should save the current step for later
+                saved_stmts.append(stack[-1])
+            elif 0 <= pf_int and pf_int < label_end:
+                # pf_int denotes an implicit hypothesis or a label in the label block
+                self.step(self.labels[labels[pf_int]], stack)
+            elif label_end <= pf_int:
+                # pf_int denotes an earlier proof step marked with a 'Z'
+                # A proof step that has already been proved can be treated as
+                # a dv-free and hypothesis-free axiom.
+                self.step(('$a', ([], [], [], saved_stmts[pf_int - label_end])), stack)
+        return stack
 
     def verify(self, f_hyps, e_hyps, conclusion, proof):
-        """Verify that the given proof is a correct proof of the given
-        provable assertion in the object database.
+        """Verify that the given proof (in normal or compressed format) is a
+        correct proof of the given assertion.
         """
         # It would not be useful to also pass the list of dv conditions of the
-        # provable assertion as an argument since other dv conditions
-        # corresponding to dummy variables should be 'lookup_d'ed anyway.
-        stack = []
-        if proof[0] == '(':
-            proof = self.decompress_proof(f_hyps, e_hyps, proof)
-        for label in proof:
-            steptyp, stepdat = self.labels[label]
-            vprint(10, label, ':', steptyp, stepdat)
-            if steptyp in ('$e', '$f'):
-                stack.append(stepdat)
-            elif steptyp in ('$a', '$p'):
-                dvs0, f_hyps0, e_hyps0, conclusion0 = stepdat
-                vprint(12, stepdat)
-                npop = len(f_hyps0) + len(e_hyps0)
-                sp = len(stack) - npop
-                if sp < 0:
-                    raise MMError('stack underflow')
-                subst = {}
-                for k, v in f_hyps0:
-                    entry = stack[sp]
-                    if entry[0] != k:
-                        raise MMError(
-                            ("stack entry {2!s} does not match floating " +
-                             "hypothesis ({0}, {1})").format(entry, k, v))
-                    subst[v] = entry[1:]
-                    sp += 1
-                vprint(15, 'subst:', subst)
-                for h in e_hyps0:
-                    entry = stack[sp]
-                    subst_h = apply_subst(h, subst)
-                    if entry != subst_h:
-                        raise MMError(("stack entry {0!s} does not match " +
-                                       "essential hypothesis {1!s}")
-                                      .format(entry, subst_h))
-                    sp += 1
-                for x, y in dvs0:
-                    vprint(16, 'dist', x, y, subst[x], subst[y])
-                    x_vars = self.find_vars(subst[x])
-                    y_vars = self.find_vars(subst[y])
-                    vprint(16, 'V(x) =', x_vars)
-                    vprint(16, 'V(y) =', y_vars)
-                    for x, y in itertools.product(x_vars, y_vars):
-                        if x == y or not self.fs.lookup_d(x, y):
-                            raise MMError("Disjoint variable violation: " +
-                                          "{0} , {1}".format(x, y))
-                del stack[len(stack) - npop:]
-                stack.append(apply_subst(conclusion0, subst))
-            vprint(12, 'stack:', stack)
+        # assertion as an argument since other dv conditions corresponding to
+        # dummy variables should be 'lookup_d'ed anyway.
+        if proof[0] == '(':  # compressed format
+            stack = self.treat_compressed_proof(f_hyps, e_hyps, proof)
+        else:  # normal format
+            stack = self.treat_normal_proof(proof)
+        vprint(10, 'stack at end of proof:', stack)
         if len(stack) != 1:
-            raise MMError(
-                "Stack has more than one entry at end of proof (top " +
+            raise MMError("Stack has more than one entry at end of proof (top " +
                 "entry: {0!s} ; proved assertion: {1!s}).".format(
                     stack[0],
                     conclusion))
