@@ -19,6 +19,8 @@
 # (rl 2-Oct-2006) removed extraneous line found by Jason Orendorff
 # (sf 27-Jan-2013) ported to Python 3, added support for compressed proofs
 # and file inclusion
+# (bj 3-Apr-2022) streamline code and significant speedup (4x) by verifying
+# compressed proofs without converting them to normal format
 
 import sys
 import itertools
@@ -372,7 +374,7 @@ class MM:
                 if entry[0] != k:
                     raise MMError(
                         ("stack entry {2!s} does not match floating " +
-                             "hypothesis ({0}, {1})").format(entry, k, v))
+                         "hypothesis ({0}, {1})").format(entry, k, v))
                 subst[v] = entry[1:]
                 sp += 1
             vprint(15, 'subst:', subst)
@@ -382,7 +384,7 @@ class MM:
                 if entry != subst_h:
                     raise MMError(("stack entry {0!s} does not match " +
                                    "essential hypothesis {1!s}")
-                                      .format(entry, subst_h))
+                                  .format(entry, subst_h))
                 sp += 1
             for x, y in dvs0:
                 vprint(16, 'dist', x, y, subst[x], subst[y])
@@ -393,7 +395,7 @@ class MM:
                 for x, y in itertools.product(x_vars, y_vars):
                     if x == y or not self.fs.lookup_d(x, y):
                         raise MMError("Disjoint variable violation: " +
-                                          "{0} , {1}".format(x, y))
+                                      "{0} , {1}".format(x, y))
             del stack[len(stack) - npop:]
             stack.append(apply_subst(conclusion0, subst))
         vprint(12, 'stack:', stack)
@@ -411,6 +413,7 @@ class MM:
         """Return the proof stack once the given compressed proof for an
         assertion with the given $f and $e-hypotheses has been processed.
         """
+        # Preprocessing and building the lists of proof_ints and labels
         f_labels = [self.fs.lookup_f(v) for _, v in f_hyps]
         e_labels = [self.fs.lookup_e(s) for s in e_hyps]
         labels = f_labels + e_labels  # labels of implicit hypotheses
@@ -420,7 +423,7 @@ class MM:
         vprint(5, 'labels:', labels)
         vprint(5, 'proof:', compressed_proof)
         proof_ints = []  # integers referencing the labels in 'labels'
-        cur_int = 0  #  counter for radix conversion
+        cur_int = 0  # counter for radix conversion
         for ch in compressed_proof:
             if ch == 'Z':
                 proof_ints.append(-1)
@@ -431,21 +434,24 @@ class MM:
                 cur_int = 5 * cur_int + ord(ch) - 84  # ord('U') = 85
         vprint(5, 'proof_ints:', proof_ints)
         label_end = len(labels)
-        saved_stmts = [] # statements saved for later reuse (marked with a 'Z')
+        # Processing of the proof
         stack = []  # proof stack
-        for pf_int in proof_ints:
+        # statements saved for later reuse (marked with a 'Z')
+        saved_stmts = []
+        for proof_int in proof_ints:
             vprint(10, 'stack:', stack)
-            if pf_int == -1:
-                # this means we should save the current step for later
+            if proof_int == -1:  # save the current step for later
                 saved_stmts.append(stack[-1])
-            elif 0 <= pf_int and pf_int < label_end:
-                # pf_int denotes an implicit hypothesis or a label in the label block
-                self.step(self.labels[labels[pf_int]], stack)
-            elif label_end <= pf_int:
+            elif 0 <= proof_int and proof_int < label_end:
+                # pf_int denotes an implicit hypothesis or a label in the label
+                # bloc
+                self.step(self.labels[labels[proof_int]], stack)
+            elif label_end <= proof_int:
                 # pf_int denotes an earlier proof step marked with a 'Z'
                 # A proof step that has already been proved can be treated as
                 # a dv-free and hypothesis-free axiom.
-                self.step(('$a', ([], [], [], saved_stmts[pf_int - label_end])), stack)
+                self.step(
+                    ('$a', ([], [], [], saved_stmts[proof_int - label_end])), stack)
         return stack
 
     def verify(self, f_hyps, e_hyps, conclusion, proof):
@@ -461,7 +467,8 @@ class MM:
             stack = self.treat_normal_proof(proof)
         vprint(10, 'stack at end of proof:', stack)
         if len(stack) != 1:
-            raise MMError("Stack has more than one entry at end of proof (top " +
+            raise MMError(
+                "Stack has more than one entry at end of proof (top " +
                 "entry: {0!s} ; proved assertion: {1!s}).".format(
                     stack[0],
                     conclusion))
