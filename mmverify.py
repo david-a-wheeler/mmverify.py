@@ -137,17 +137,17 @@ class FrameStack(list):
     def add_c(self, tok):
         """Add a constant to the frame stack top.  Allow local definitions."""
         if self.lookup_c(tok):
-            raise MMError('const already defined in scope')
+            raise MMError('const already defined and active')
         if self.lookup_v(tok):
-            raise MMError('const already defined as var in scope')
+            raise MMError('const already defined as var and active')
         self[-1].c.add(tok)
 
     def add_v(self, tok):
         """Add a variable to the frame stack top.  Allow local definitions."""
         if self.lookup_v(tok):
-            raise MMError('var already defined in scope')
+            raise MMError('var already defined and active')
         if self.lookup_c(tok):
-            raise MMError('var already defined as const in scope')
+            raise MMError('var already defined as const and active')
         self[-1].v.add(tok)
 
     def add_f(self, var, kind, label):
@@ -163,7 +163,7 @@ class FrameStack(list):
         # If that restriction is removed, then 'make_assertion' should be
         # changed accordingly with the comment there.
         if any(var in fr.f_labels.keys() for fr in self):
-            raise MMError('var in $f already defined in scope')
+            raise MMError('var in $f already typed by an active $f-statement')
         frame.f.append((var, kind))
         frame.f_labels[var] = label
 
@@ -183,26 +183,22 @@ class FrameStack(list):
                           for x, y in itertools.product(stat, stat) if x != y)
 
     def lookup_c(self, tok):
-        """Return whether the given token was defined as a constant in the
-        current scope.
-        """
+        """Return whether the given token is an active constant."""
         return any(tok in fr.c for fr in self)
 
     def lookup_v(self, tok):
-        """Return whether the given token was defined as a variable in the
-        current scope.
-        """
+        """Return whether the given token is an active variable."""
         return any(tok in fr.v for fr in self)
 
     def lookup_d(self, x, y):
-        """Return whether the given ordered pair of variables has a disjoint
-        variable condition in the current scope.
+        """Return whether the given ordered pair of tokens belongs to an
+        active disjoint variable statement.
         """
         return any((min(x, y), max(x, y)) in fr.d for fr in self)
 
     def lookup_f(self, var):
-        """Return the label of the latest floating hypothesis which types the
-        given variable.
+        """Return the label of the latest active floating hypothesis which
+        types the given variable.
         """
         for frame in reversed(self):
             try:
@@ -212,8 +208,8 @@ class FrameStack(list):
         raise MMKeyError(var)
 
     def lookup_e(self, stmt):
-        """Return the label of the latest essential hypothesis with the given
-        statement.
+        """Return the label of the latest active essential hypothesis with the
+        given statement.
         """
         stmt_t = tuple(stmt)
         for frame in reversed(self):
@@ -224,8 +220,9 @@ class FrameStack(list):
         raise MMKeyError(stmt_t)
 
     def make_assertion(self, stat):
-        """Return a quadruple (dv conditions, floating hypotheses, essential
-        hypotheses, conclusion) describing the given assertion.
+        """Return a quadruple (disjoint variable conditions, floating
+        hypotheses, essential hypotheses, conclusion) describing the given
+        assertion.
         """
         e_hyps = [eh for fr in self for eh in fr.e]
         mand_vars = {tok for hyp in itertools.chain(e_hyps, [stat])
@@ -329,7 +326,7 @@ class MM:
                     raise MMError('$p must contain a proof after $=')
                 dvs, f_hyps, e_hyps, conclusion = self.fs.make_assertion(stat)
                 if not self.begin_label:
-                    vprint(1, 'verifying:', label)
+                    vprint(2, 'verifying:', label)
                     self.verify(f_hyps, e_hyps, conclusion, proof)
                 self.labels[label] = ('$p', (dvs, f_hyps, e_hyps, conclusion))
                 label = None
@@ -412,8 +409,11 @@ class MM:
 
     def verify(self, f_hyps, e_hyps, conclusion, proof):
         """Verify that the given proof is a correct proof of the given
-        statement in the object database.
+        provable assertion in the object database.
         """
+        # It would not be useful to also pass the list of dv conditions of the
+        # provable assertion as an argument since other dv conditions
+        # corresponding to dummy variables should be 'lookup_d'ed anyway.
         stack = []
         if proof[0] == '(':
             proof = self.decompress_proof(f_hyps, e_hyps, proof)
@@ -434,8 +434,8 @@ class MM:
                     entry = stack[sp]
                     if entry[0] != k:
                         raise MMError(
-                            ("stack entry ({0}, {1}) does not match " +
-                             "floating hypothesis {2!s}").format(k, v, entry))
+                            ("stack entry {2!s} does not match floating " +
+                             "hypothesis ({0}, {1})").format(entry, k, v))
                     subst[v] = entry[1:]
                     sp += 1
                 vprint(15, 'subst:', subst)
@@ -455,15 +455,20 @@ class MM:
                     vprint(16, 'V(y) =', y_vars)
                     for x, y in itertools.product(x_vars, y_vars):
                         if x == y or not self.fs.lookup_d(x, y):
-                            raise MMError(
-                                "disjoint violation: {0}, {1}" .format(x, y))
+                            raise MMError("Disjoint variable violation: " +
+                                          "{0} , {1}".format(x, y))
                 del stack[len(stack) - npop:]
                 stack.append(apply_subst(conclusion0, subst))
             vprint(12, 'stack:', stack)
         if len(stack) != 1:
-            raise MMError('Stack has more than one entry at the end')
+            raise MMError(
+                "Stack has more than one entry at end of proof (top " +
+                "entry: {0!s} ; proved assertion: {1!s}).".format(
+                    stack[0],
+                    conclusion))
         if stack[0] != conclusion:
-            raise MMError("Assertion proved does not match")
+            raise MMError("Stack entry {0!s} does not match proved " +
+                          " assertion {1!s}".format(stack[0], conclusion))
 
     def dump(self):
         """Print the labels of the database."""
@@ -513,6 +518,9 @@ if __name__ == '__main__':
     verbosity = args.verbosity
     database = args.database
     logfile = args.logfile
+    vprint(1, 'mmverify.py -- Proof verifier for the Metamath language')
     mm = MM(args.begin_label, args.stop_label)
+    vprint(1, 'Reading source file "{0}"...'.format(database.name))
     mm.read(toks(database))
+    vprint(1, 'No errors were found.')
     # mm.dump()
