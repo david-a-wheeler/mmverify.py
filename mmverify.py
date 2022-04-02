@@ -27,10 +27,12 @@ import argparse
 
 
 class MMError(Exception):
+    """Class of Metamath errors."""
     pass
 
 
 class MMKeyError(MMError, KeyError):
+    """Class of Metamath key errors."""
     pass
 
 
@@ -197,10 +199,10 @@ class FrameStack(list):
         return any((min(x, y), max(x, y)) in fr.d for fr in self)
 
     def lookup_f(self, var):
-        """Return the label of the latest active floating hypothesis which
-        types the given variable.
+        """Return the label of the active floating hypothesis which types the
+        given variable.
         """
-        for frame in reversed(self):
+        for frame in self:
             try:
                 return frame.f_labels[var]
             except KeyError:
@@ -208,11 +210,11 @@ class FrameStack(list):
         raise MMKeyError(var)
 
     def lookup_e(self, stmt):
-        """Return the label of the latest active essential hypothesis with the
-        given statement.
+        """Return the label of the (earliest) active essential hypothesis with
+        the given statement.
         """
         stmt_t = tuple(stmt)
-        for frame in reversed(self):
+        for frame in self:
             try:
                 return frame.e_labels[stmt_t]
             except KeyError:
