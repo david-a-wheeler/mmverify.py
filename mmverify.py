@@ -359,7 +359,7 @@ class MM:
                 vars.append(x)
         return vars
 
-    def step(self, step, stack):
+    def treat_step(self, step, stack):
         """Carry out the given proof step (given the label to treat and the
         current proof stack).  This modifies the given stack in place.
         """
@@ -412,7 +412,7 @@ class MM:
         """
         stack = []
         for label in proof:
-            self.step(self.labels[label], stack)
+            self.treat_step(self.labels[label], stack)
         return stack
 
     def treat_compressed_proof(self, f_hyps, e_hyps, proof):
@@ -451,12 +451,12 @@ class MM:
             elif 0 <= proof_int and proof_int < label_end:
                 # pf_int denotes an implicit hypothesis or a label in the label
                 # bloc
-                self.step(self.labels[labels[proof_int]], stack)
+                self.treat_step(self.labels[labels[proof_int]], stack)
             elif label_end <= proof_int:
                 # pf_int denotes an earlier proof step marked with a 'Z'
                 # A proof step that has already been proved can be treated as
                 # a dv-free and hypothesis-free axiom.
-                self.step(
+                self.treat_step(
                     ('$a', ([], [], [], saved_stmts[proof_int - label_end])), stack)
         return stack
 
