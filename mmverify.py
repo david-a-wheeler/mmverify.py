@@ -43,9 +43,9 @@ Fhyp = tuple[Var, Const]
 Dv = tuple[Var, Var]
 Assertion = tuple[set[Dv], list[Fhyp], list[Ehyp], Stmt]
 FullStmt = tuple[Steptyp, typing.Union[Stmt, Assertion]]
-# actually, the second component of a FullStmt is a Stmt when its first
-# component is 'e' or 'f' and an Assertion if its first component is 'a' or
-# 'p', but this is a bit cumbersome to build it into the typing system.
+# Actually, the second component of a FullStmt is a Stmt when its first
+# component is '$e' or '$f' and an Assertion if its first component is '$a' or
+# '$p', but this is a bit cumbersome to build it into the typing system.
 # This explains the errors when static type checking (e.g., mypy).
 
 
