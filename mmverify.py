@@ -186,6 +186,7 @@ class FrameStack(list):
         frame = self[-1]
         frame.e.append(stat)
         frame.e_labels[tuple(stat)] = label
+        # conversion to tuple since dictionary keys must be hashable
 
     def add_d(self, stat):
         """Add a disjoint variable condition (ordered pair of variables) to
