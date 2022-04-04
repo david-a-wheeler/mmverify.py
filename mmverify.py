@@ -207,11 +207,10 @@ class FrameStack(list):
         frame.e_labels[tuple(stmt)] = label
         # conversion to tuple since dictionary keys must be hashable
 
-    def add_d(self, stmt: Stmt) -> None:
+    def add_d(self, varlist: list[Var]) -> None:
         """Add a disjoint variable condition (ordered pair of variables) to
         the frame stack top.
         """
-        varlist = self.find_vars(stmt)
         self[-1].d.update((min(x, y), max(x, y))
                           for x, y in itertools.product(varlist, varlist) if x != y)
 
