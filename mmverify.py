@@ -127,19 +127,19 @@ class toks:
             else:
                 return tok
 
-    def readstat(self) -> Stmt:
+    def readstmt(self) -> Stmt:
         """Read tokens from the input (assumed to be at the beginning of a
         statement) and return the list of tokens until the next end-statement
         token '$.'.
         """
-        stat = []
+        stmt = []
         tok = self.readc()
         while tok != '$.':
             if tok is None:
                 raise MMError('EOF before $.')
-            stat.append(tok)
+            stmt.append(tok)
             tok = self.readc()
-        return stat
+        return stmt
 
 
 class Frame:
@@ -198,21 +198,22 @@ class FrameStack(list):
         frame.f.append((var, kind))
         frame.f_labels[var] = label
 
-    def add_e(self, stat: Stmt, label: Label) -> None:
+    def add_e(self, stmt: Stmt, label: Label) -> None:
         """Add an essential hypothesis (token tuple) to the frame stack
         top.
         """
         frame = self[-1]
-        frame.e.append(stat)
-        frame.e_labels[tuple(stat)] = label
+        frame.e.append(stmt)
+        frame.e_labels[tuple(stmt)] = label
         # conversion to tuple since dictionary keys must be hashable
 
-    def add_d(self, stat: Stmt) -> None:
+    def add_d(self, stmt: Stmt) -> None:
         """Add a disjoint variable condition (ordered pair of variables) to
         the frame stack top.
         """
+        varlist = self.find_vars(stmt)
         self[-1].d.update((min(x, y), max(x, y))
-                          for x, y in itertools.product(stat, stat) if x != y)
+                          for x, y in itertools.product(varlist, varlist) if x != y)
 
     def lookup_c(self, tok: Const) -> bool:
         """Return whether the given token is an active constant."""
@@ -251,13 +252,21 @@ class FrameStack(list):
                 pass
         raise MMKeyError(stmt_t)
 
-    def make_assertion(self, stat: Stmt) -> Assertion:
+    def find_vars(self, stmt: Stmt) -> list[Var]:
+        """Return the list of variables in the given statement."""
+        vars = []
+        for x in stmt:
+            if x not in vars and self.lookup_v(x):
+                vars.append(x)
+        return vars
+
+    def make_assertion(self, stmt: Stmt) -> Assertion:
         """Return a quadruple (disjoint variable conditions, floating
         hypotheses, essential hypotheses, conclusion) describing the given
         assertion.
         """
         e_hyps = [eh for fr in self for eh in fr.e]
-        mand_vars = {tok for hyp in itertools.chain(e_hyps, [stat])
+        mand_vars = {tok for hyp in itertools.chain(e_hyps, [stmt])
                      for tok in hyp if self.lookup_v(tok)}
         dvs = {(x, y) for fr in self for (x, y) in
                fr.d.intersection(itertools.product(mand_vars, mand_vars))}
@@ -272,21 +281,21 @@ class FrameStack(list):
                 if v in mand_vars:
                     f_hyps.append((k, v))
                     mand_vars.remove(v)
-        vprint(18, 'make_assertion:', dvs, f_hyps, e_hyps, stat)
-        return (dvs, f_hyps, e_hyps, stat)
+        vprint(18, 'make_assertion:', dvs, f_hyps, e_hyps, stmt)
+        return (dvs, f_hyps, e_hyps, stmt)
 
 
-def apply_subst(stat: Stmt, subst: dict[Var, Stmt]) -> Stmt:
+def apply_subst(stmt: Stmt, subst: dict[Var, Stmt]) -> Stmt:
     """Return the token list resulting from the given substitution
     (dictionary) applied to the given statement (token list).
     """
     result = []
-    for tok in stat:
+    for tok in stmt:
         if tok in subst:
             result += subst[tok]
         else:
             result.append(tok)
-    vprint(20, 'apply_subst:', stat, subst, '=', result)
+    vprint(20, 'apply_subst:', stmt, subst, '=', result)
     return result
 
 
@@ -309,27 +318,27 @@ class MM:
         tok = toks.readc()
         while tok and tok != '$}':
             if tok == '$c':
-                for tok in toks.readstat():
+                for tok in toks.readstmt():
                     self.fs.add_c(tok)
             elif tok == '$v':
-                for tok in toks.readstat():
+                for tok in toks.readstmt():
                     self.fs.add_v(tok)
             elif tok == '$f':
-                stat = toks.readstat()
+                stmt = toks.readstmt()
                 if not label:
                     raise MMError('$f must have label')
-                if len(stat) != 2:
+                if len(stmt) != 2:
                     raise MMError('$f must have length 2')
-                vprint(15, label, '$f', stat[0], stat[1], '$.')
-                self.fs.add_f(stat[1], stat[0], label)
-                self.labels[label] = ('$f', [stat[0], stat[1]])
+                vprint(15, label, '$f', stmt[0], stmt[1], '$.')
+                self.fs.add_f(stmt[1], stmt[0], label)
+                self.labels[label] = ('$f', [stmt[0], stmt[1]])
                 label = None
             elif tok == '$e':
                 if not label:
                     raise MMError('$e must have label')
-                stat = toks.readstat()
-                self.fs.add_e(stat, label)
-                self.labels[label] = ('$e', stat)
+                stmt = toks.readstmt()
+                self.fs.add_e(stmt, label)
+                self.labels[label] = ('$e', stmt)
                 label = None
             elif tok == '$a':
                 if not label:
@@ -339,7 +348,7 @@ class MM:
                 if label == self.begin_label:
                     self.begin_label = None
                 self.labels[label] = ('$a',
-                                      self.fs.make_assertion(toks.readstat()))
+                                      self.fs.make_assertion(toks.readstmt()))
                 label = None
             elif tok == '$p':
                 if not label:
@@ -348,22 +357,22 @@ class MM:
                     sys.exit(0)
                 if label == self.begin_label:
                     self.begin_label = None
-                stat = toks.readstat()
+                stmt = toks.readstmt()
                 proof = None
                 try:
-                    i = stat.index('$=')
-                    proof = stat[i + 1:]
-                    stat = stat[:i]
+                    i = stmt.index('$=')
+                    proof = stmt[i + 1:]
+                    stmt = stmt[:i]
                 except ValueError:
                     raise MMError('$p must contain a proof after $=')
-                dvs, f_hyps, e_hyps, conclusion = self.fs.make_assertion(stat)
+                dvs, f_hyps, e_hyps, conclusion = self.fs.make_assertion(stmt)
                 if not self.begin_label:
                     vprint(2, 'verifying:', label)
                     self.verify(f_hyps, e_hyps, conclusion, proof)
                 self.labels[label] = ('$p', (dvs, f_hyps, e_hyps, conclusion))
                 label = None
             elif tok == '$d':
-                self.fs.add_d(toks.readstat())
+                self.fs.add_d(toks.readstmt())
             elif tok == '${':
                 self.read(toks)
             elif tok[0] != '$':
@@ -372,14 +381,6 @@ class MM:
                 print('Unknown token:', tok)
             tok = toks.readc()
         self.fs.pop()
-
-    def find_vars(self, stat: Stmt) -> list[Var]:
-        """Return the list of variables in the given statement."""
-        vars = []
-        for x in stat:
-            if x not in vars and self.fs.lookup_v(x):
-                vars.append(x)
-        return vars
 
     def treat_step(self,
                    step: FullStmt,
@@ -418,8 +419,8 @@ class MM:
                 sp += 1
             for x, y in dvs0:
                 vprint(16, 'dist', x, y, subst[x], subst[y])
-                x_vars = self.find_vars(subst[x])
-                y_vars = self.find_vars(subst[y])
+                x_vars = self.fs.find_vars(subst[x])
+                y_vars = self.fs.find_vars(subst[y])
                 vprint(16, 'V(x) =', x_vars)
                 vprint(16, 'V(y) =', y_vars)
                 for x, y in itertools.product(x_vars, y_vars):
