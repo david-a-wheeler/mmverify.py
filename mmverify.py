@@ -459,7 +459,7 @@ class MM:
                 # A proof step that has already been proved can be treated as
                 # a dv-free and hypothesis-free axiom.
                 self.treat_step(
-                    ('$a', ([], [], [], saved_stmts[proof_int - label_end])), stack)
+                    ('$a', (set(), [], [], saved_stmts[proof_int - label_end])), stack)
         return stack
 
     def verify(self, f_hyps, e_hyps, conclusion, proof):
