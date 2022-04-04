@@ -28,6 +28,25 @@ import sys
 import itertools
 import pathlib
 import argparse
+import typing
+import io
+
+Label = str
+Var = str
+Const = str
+Steptyp = str  # can actually be one of '$e', '$f', '$a', '$p'
+StringOption = typing.Optional[str]
+Symbol = typing.Union[Var, Const]
+Stmt = list[Symbol]
+Ehyp = Stmt
+Fhyp = tuple[Var, Const]
+Dv = tuple[Var, Var]
+Assertion = tuple[set[Dv], list[Fhyp], list[Ehyp], Stmt]
+FullStmt = tuple[Steptyp, typing.Union[Stmt, Assertion]]
+# actually, the second component of a FullStmt is a Stmt when its first
+# component is 'e' or 'f' and an Assertion if its first component is 'a' or
+# 'p', but this is a bit cumbersome to build it into the typing system.
+# This explains the errors when static type checking (e.g., mypy).
 
 
 class MMError(Exception):
@@ -40,7 +59,7 @@ class MMKeyError(MMError, KeyError):
     pass
 
 
-def vprint(vlevel, *args):
+def vprint(vlevel: int, *args) -> None:
     """Print log message if verbosity level is higher than the argument."""
     if verbosity >= vlevel:
         print(*args, file=logfile)
@@ -51,17 +70,17 @@ class toks:
     stream.
     """
 
-    def __init__(self, file):
+    def __init__(self, file: io.TextIOWrapper) -> None:
         """Construct a 'toks' from the given file: initialize a line buffer
         containing the lines of the file, and initialize a set of imported
         files to a singleton containing that file, so as to avoid multiple
         imports.
         """
         self.lines_buf = [file]
-        self.tokbuf = []
+        self.tokbuf: list[str] = []
         self.imported_files = set({pathlib.Path(file.name).resolve()})
 
-    def read(self):
+    def read(self) -> StringOption:
         """Read the next token in the token buffer, or if it is empty, split
         the next line into tokens and read from it."""
         while not self.tokbuf:
@@ -75,7 +94,7 @@ class toks:
                 self.tokbuf.reverse()
         return self.tokbuf.pop()
 
-    def readf(self):
+    def readf(self) -> StringOption:
         """Read the next token once included files have been expanded.  In the
         latter case, the path/name of the expanded file is added to the set of
         imported files so as to avoid multiple imports.
@@ -96,7 +115,7 @@ class toks:
             tok = self.read()
         return tok
 
-    def readc(self):
+    def readc(self) -> StringOption:
         """Read the next token once included files have been expanded and
         ignoring comments.
         """
@@ -108,7 +127,7 @@ class toks:
             else:
                 return tok
 
-    def readstat(self):
+    def readstat(self) -> Stmt:
         """Read tokens from the input (assumed to be at the beginning of a
         statement) and return the list of tokens until the next end-statement
         token '$.'.
@@ -126,15 +145,15 @@ class toks:
 class Frame:
     """Class of frames, keeping track of the environment."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Construct an empty frame."""
-        self.c = set()
-        self.v = set()
-        self.d = set()
-        self.f = []
-        self.f_labels = {}
-        self.e = []
-        self.e_labels = {}
+        self.c: set[Const] = set()
+        self.v: set[Var] = set()
+        self.d: set[Dv] = set()
+        self.f: list[Fhyp] = []
+        self.f_labels: dict[Var, Label] = {}
+        self.e: list[Ehyp] = []
+        self.e_labels: dict[tuple[Symbol], Label] = {}
 
 
 class FrameStack(list):
@@ -142,11 +161,11 @@ class FrameStack(list):
     stacks).
     """
 
-    def push(self):
+    def push(self) -> None:
         """Push an empty frame to the stack."""
         self.append(Frame())
 
-    def add_c(self, tok):
+    def add_c(self, tok: Const) -> None:
         """Add a constant to the frame stack top.  Allow local definitions."""
         if self.lookup_c(tok):
             raise MMError('const already defined and active')
@@ -154,7 +173,7 @@ class FrameStack(list):
             raise MMError('const already defined as var and active')
         self[-1].c.add(tok)
 
-    def add_v(self, tok):
+    def add_v(self, tok: Var) -> None:
         """Add a variable to the frame stack top.  Allow local definitions."""
         if self.lookup_v(tok):
             raise MMError('var already defined and active')
@@ -162,7 +181,7 @@ class FrameStack(list):
             raise MMError('var already defined as const and active')
         self[-1].v.add(tok)
 
-    def add_f(self, var, kind, label):
+    def add_f(self, var: Var, kind: Const, label: Label) -> None:
         """Add a floating hypothesis (ordered pair (variable, kind)) to the
         frame stack top.
         """
@@ -179,7 +198,7 @@ class FrameStack(list):
         frame.f.append((var, kind))
         frame.f_labels[var] = label
 
-    def add_e(self, stat, label):
+    def add_e(self, stat: Stmt, label: Label) -> None:
         """Add an essential hypothesis (token tuple) to the frame stack
         top.
         """
@@ -188,28 +207,28 @@ class FrameStack(list):
         frame.e_labels[tuple(stat)] = label
         # conversion to tuple since dictionary keys must be hashable
 
-    def add_d(self, stat):
+    def add_d(self, stat: Stmt) -> None:
         """Add a disjoint variable condition (ordered pair of variables) to
         the frame stack top.
         """
         self[-1].d.update((min(x, y), max(x, y))
                           for x, y in itertools.product(stat, stat) if x != y)
 
-    def lookup_c(self, tok):
+    def lookup_c(self, tok: Const) -> bool:
         """Return whether the given token is an active constant."""
         return any(tok in fr.c for fr in self)
 
-    def lookup_v(self, tok):
+    def lookup_v(self, tok: Var) -> bool:
         """Return whether the given token is an active variable."""
         return any(tok in fr.v for fr in self)
 
-    def lookup_d(self, x, y):
+    def lookup_d(self, x: Var, y: Var) -> bool:
         """Return whether the given ordered pair of tokens belongs to an
         active disjoint variable statement.
         """
         return any((min(x, y), max(x, y)) in fr.d for fr in self)
 
-    def lookup_f(self, var):
+    def lookup_f(self, var: Var) -> Label:
         """Return the label of the active floating hypothesis which types the
         given variable.
         """
@@ -220,7 +239,7 @@ class FrameStack(list):
                 pass
         raise MMKeyError(var)
 
-    def lookup_e(self, stmt):
+    def lookup_e(self, stmt: Stmt) -> Label:
         """Return the label of the (earliest) active essential hypothesis with
         the given statement.
         """
@@ -232,7 +251,7 @@ class FrameStack(list):
                 pass
         raise MMKeyError(stmt_t)
 
-    def make_assertion(self, stat):
+    def make_assertion(self, stat: Stmt) -> Assertion:
         """Return a quadruple (disjoint variable conditions, floating
         hypotheses, essential hypotheses, conclusion) describing the given
         assertion.
@@ -257,7 +276,7 @@ class FrameStack(list):
         return (dvs, f_hyps, e_hyps, stat)
 
 
-def apply_subst(stat, subst):
+def apply_subst(stat: Stmt, subst: dict[Var, Stmt]) -> Stmt:
     """Return the token list resulting from the given substitution
     (dictionary) applied to the given statement (token list).
     """
@@ -274,21 +293,21 @@ def apply_subst(stat, subst):
 class MM:
     """Class of ("abstract syntax trees" describing) Metamath databases."""
 
-    def __init__(self, begin_label, stop_label):
+    def __init__(self, begin_label: Label, stop_label: Label) -> None:
         """Construct an empty Metamath database."""
         self.fs = FrameStack()
-        self.labels = {}
+        self.labels: dict[Label, FullStmt] = {}
         self.begin_label = begin_label
         self.stop_label = stop_label
 
-    def read(self, toks):
+    def read(self, toks: toks) -> None:
         """Read the given token list to update the database and verify its
         proofs.
         """
         self.fs.push()
         label = None
         tok = toks.readc()
-        while tok not in (None, '$}'):
+        while tok and tok != '$}':
             if tok == '$c':
                 for tok in toks.readstat():
                     self.fs.add_c(tok)
@@ -354,7 +373,7 @@ class MM:
             tok = toks.readc()
         self.fs.pop()
 
-    def find_vars(self, stat):
+    def find_vars(self, stat: Stmt) -> list[Var]:
         """Return the list of variables in the given statement."""
         vars = []
         for x in stat:
@@ -362,7 +381,9 @@ class MM:
                 vars.append(x)
         return vars
 
-    def treat_step(self, step, stack):
+    def treat_step(self,
+                   step: FullStmt,
+                   stack: list[Stmt]) -> None:
         """Carry out the given proof step (given the label to treat and the
         current proof stack).  This modifies the given stack in place.
         """
@@ -377,7 +398,7 @@ class MM:
             sp = len(stack) - npop
             if sp < 0:
                 raise MMError('stack underflow')
-            subst = {}
+            subst: dict[Var, Stmt] = {}
             for k, v in f_hyps0:
                 entry = stack[sp]
                 if entry[0] != k:
@@ -409,16 +430,20 @@ class MM:
             stack.append(apply_subst(conclusion0, subst))
         vprint(12, 'stack:', stack)
 
-    def treat_normal_proof(self, proof):
+    def treat_normal_proof(self, proof) -> list[Stmt]:
         """Return the proof stack once the given normal proof has been
         processed.
         """
-        stack = []
+        stack: list[Stmt] = []
         for label in proof:
             self.treat_step(self.labels[label], stack)
         return stack
 
-    def treat_compressed_proof(self, f_hyps, e_hyps, proof):
+    def treat_compressed_proof(
+            self,
+            f_hyps: list[Fhyp],
+            e_hyps: list[Ehyp],
+            proof) -> list[Stmt]:
         """Return the proof stack once the given compressed proof for an
         assertion with the given $f and $e-hypotheses has been processed.
         """
@@ -444,7 +469,7 @@ class MM:
         vprint(5, 'proof_ints:', proof_ints)
         label_end = len(labels)
         # Processing of the proof
-        stack = []  # proof stack
+        stack: list[Stmt] = []  # proof stack
         # statements saved for later reuse (marked with a 'Z')
         saved_stmts = []
         for proof_int in proof_ints:
@@ -463,7 +488,12 @@ class MM:
                     ('$a', (set(), [], [], saved_stmts[proof_int - label_end])), stack)
         return stack
 
-    def verify(self, f_hyps, e_hyps, conclusion, proof):
+    def verify(
+            self,
+            f_hyps: list[Fhyp],
+            e_hyps: list[Ehyp],
+            conclusion: Stmt,
+            proof) -> None:
         """Verify that the given proof (in normal or compressed format) is a
         correct proof of the given assertion.
         """
@@ -485,7 +515,7 @@ class MM:
             raise MMError(("Stack entry {0!s} does not match proved " +
                           " assertion {1!s}").format(stack[0], conclusion))
 
-    def dump(self):
+    def dump(self) -> None:
         """Print the labels of the database."""
         print(self.labels)
 
