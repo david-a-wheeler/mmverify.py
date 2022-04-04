@@ -6,9 +6,11 @@
 
 # To run the program, type
 #   $ python3 mmverify.py set.mm --logfile set.log
-# or (using bash redirections)
-#   $ python3 mmverify.py < set.mm 2> set.log
-# and set.log will have the verification results.
+# and set.log will have the verification results.  One can also use bash
+# redirections and type '$ python3 mmverify.py < set.mm 2> set.log' but this
+# would fail in case 'set.mm' contains (directly or not) a recursive inclusion
+# statement $[ set.mm $] .
+#
 # To get help on the program usage, type
 #   $ python3 mmverify.py -h
 
@@ -24,7 +26,7 @@
 
 import sys
 import itertools
-import os.path
+import pathlib
 import argparse
 
 
@@ -49,17 +51,20 @@ class toks:
     stream.
     """
 
-    def __init__(self, lines):
-        """Construct a toks with the given list of lines, an empty tokbuf
-        list, and an empty set of names of imported files.
+    def __init__(self, file):
+        """Construct a 'toks' from the given file: initialize a line buffer
+        containing the lines of the file, and initialize a set of imported
+        files to a singleton containing that file, so as to avoid multiple
+        imports.
         """
-        self.lines_buf = [lines]
+        self.lines_buf = [file]
         self.tokbuf = []
-        self.imported_files = set()
+        self.imported_files = set({pathlib.Path(file.name).resolve()})
 
     def read(self):
-        """Read the next token."""
-        while self.tokbuf == []:
+        """Read the next token in the token buffer, or if it is empty, split
+        the next line into tokens and read from it."""
+        while not self.tokbuf:
             line = self.lines_buf[-1].readline()
             if not line:
                 self.lines_buf.pop().close()
@@ -72,8 +77,8 @@ class toks:
 
     def readf(self):
         """Read the next token once included files have been expanded.  In the
-        latter case, the name of the expanded file is added to a list so as to
-        avoid multiple imports.
+        latter case, the path/name of the expanded file is added to the set of
+        imported files so as to avoid multiple imports.
         """
         tok = self.read()
         while tok == '$[':
@@ -81,10 +86,11 @@ class toks:
             endbracket = self.read()
             if endbracket != '$]':
                 raise MMError('Inclusion command not terminated')
-            filename = os.path.realpath(filename)
-            if filename not in self.imported_files:
-                self.lines_buf.append(open(filename, 'r'))
-                self.imported_files.add(filename)
+            file = pathlib.Path(filename).resolve()
+            if file not in self.imported_files:
+                self.lines_buf.append(open(file, mode='r', encoding='ascii'))
+                self.imported_files.add(file)
+                vprint(5, 'Importing file:', filename)
             tok = self.read()
         return tok
 
@@ -483,50 +489,63 @@ class MM:
 
 if __name__ == '__main__':
     """Parse the arguments and verify the given Metamath database."""
-    parser = argparse.ArgumentParser(description='Verify a Metamath database.')
+    parser = argparse.ArgumentParser(description="""Verify a Metamath database.
+      The grammar of the whole file is verified.  Proofs are verified between
+      the statements with labels BEGIN_LABEL (included) and STOP_LABEL (not
+      included).
+
+      One can also use bash redirections:
+         '$ python3 mmverify.py < file.mm 2> file.log'
+      in place of
+         '$ python3 mmverify.py file.mm --logfile file.log'
+      but this fails in case 'file.mm' contains (directly or not) a recursive
+      inclusion statement '$[ file.mm $]'.""")
     parser.add_argument(
         'database',
         nargs='?',
         type=argparse.FileType(
-            'r',
+            mode='r',
             encoding='ascii'),
         default=sys.stdin,
-        help='database (file) to verify (defaults to stdin)')
+        help="""database (Metamath file) to verify, expressed using relative
+          path (defaults to <stdin>)""")
     parser.add_argument(
         '-l',
         '--logfile',
         dest='logfile',
         type=argparse.FileType(
-            'w',
+            mode='w',
             encoding='ascii'),
         default=sys.stderr,
-        help='file to output logs (defaults to stderr)')
+        help="""file to output logs, expressed using relative path (defaults to
+          <stderr>)""")
     parser.add_argument(
         '-v',
         '--verbosity',
         dest='verbosity',
         default=0,
         type=int,
-        help='verbosity level')
+        help='verbosity level (default=0 is mute; higher is more verbose)')
     parser.add_argument(
         '-b',
         '--begin-label',
         dest='begin_label',
         type=str,
-        help='assertion label where to begin verifying (included if $p)')
+        help="""assertion label where to begin verifying proofs (included,
+          provided it is a provable statement)""")
     parser.add_argument(
         '-s',
         '--stop-label',
         dest='stop_label',
         type=str,
-        help='assertion label where to stop verifying (not included)')
+        help='assertion label where to stop verifying proofs (not included)')
     args = parser.parse_args()
     verbosity = args.verbosity
-    database = args.database
+    db_file = args.database
     logfile = args.logfile
     vprint(1, 'mmverify.py -- Proof verifier for the Metamath language')
     mm = MM(args.begin_label, args.stop_label)
-    vprint(1, 'Reading source file "{0}"...'.format(database.name))
-    mm.read(toks(database))
+    vprint(1, 'Reading source file "{0}"...'.format(db_file.name))
+    mm.read(toks(db_file))
     vprint(1, 'No errors were found.')
     # mm.dump()
