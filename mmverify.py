@@ -83,6 +83,8 @@ class toks:
         tok = self.read()
         while tok == '$[':
             filename = self.read()
+            if not filename:
+                raise MMError('Inclusion command not terminated')
             endbracket = self.read()
             if endbracket != '$]':
                 raise MMError('Inclusion command not terminated')
