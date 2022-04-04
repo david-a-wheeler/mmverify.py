@@ -481,8 +481,8 @@ class MM:
                     stack[0],
                     conclusion))
         if stack[0] != conclusion:
-            raise MMError("Stack entry {0!s} does not match proved " +
-                          " assertion {1!s}".format(stack[0], conclusion))
+            raise MMError(("Stack entry {0!s} does not match proved " +
+                          " assertion {1!s}").format(stack[0], conclusion))
 
     def dump(self):
         """Print the labels of the database."""
