@@ -448,13 +448,13 @@ class MM:
         assertion with the given $f and $e-hypotheses has been processed.
         """
         # Preprocessing and building the lists of proof_ints and labels
-        f_labels = [self.fs.lookup_f(v) for _, v in f_hyps]
-        e_labels = [self.fs.lookup_e(s) for s in e_hyps]
-        labels = f_labels + e_labels  # labels of implicit hypotheses
+        flabels = [self.fs.lookup_f(v) for _, v in f_hyps]
+        elabels = [self.fs.lookup_e(s) for s in e_hyps]
+        plabels = flabels + elabels  # labels of implicit hypotheses
         idx_bloc = proof.index(')')  # index of end of label bloc
-        labels += proof[1:idx_bloc]  # labels which will be referenced later
+        plabels += proof[1:idx_bloc]  # labels which will be referenced later
         compressed_proof = ''.join(proof[idx_bloc + 1:])
-        vprint(5, 'labels:', labels)
+        vprint(5, 'labels:', plabels)
         vprint(5, 'proof:', compressed_proof)
         proof_ints = []  # integers referencing the labels in 'labels'
         cur_int = 0  # counter for radix conversion
@@ -467,7 +467,7 @@ class MM:
             else:  # 'U' <= ch and ch <= 'Y'
                 cur_int = 5 * cur_int + ord(ch) - 84  # ord('U') = 85
         vprint(5, 'proof_ints:', proof_ints)
-        label_end = len(labels)
+        label_end = len(plabels)
         # Processing of the proof
         stack: list[Stmt] = []  # proof stack
         # statements saved for later reuse (marked with a 'Z')
@@ -479,7 +479,7 @@ class MM:
             elif 0 <= proof_int and proof_int < label_end:
                 # pf_int denotes an implicit hypothesis or a label in the label
                 # bloc
-                self.treat_step(self.labels[labels[proof_int]], stack)
+                self.treat_step(self.labels[plabels[proof_int]], stack)
             elif label_end <= proof_int:
                 # pf_int denotes an earlier proof step marked with a 'Z'
                 # A proof step that has already been proved can be treated as
