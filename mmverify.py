@@ -47,7 +47,9 @@ FullStmt = tuple[Steptyp, typing.Union[Stmt, Assertion]]
 # Actually, the second component of a FullStmt is a Stmt when its first
 # component is '$e' or '$f' and an Assertion if its first component is '$a' or
 # '$p', but this is a bit cumbersome to build it into the typing system.
-# This explains the errors when static type checking (e.g., mypy).
+# This explains the errors when static type checking (e.g., mypy): an
+# if-statement determines in which case we are, but this is invisible to the
+# type checker.
 
 
 class MMError(Exception):
@@ -60,19 +62,19 @@ class MMKeyError(MMError, KeyError):
     pass
 
 
-def vprint(vlevel: int, *args: typing.Any) -> None:
+def vprint(vlevel: int, *arguments: typing.Any) -> None:
     """Print log message if verbosity level is higher than the argument."""
     if verbosity >= vlevel:
-        print(*args, file=logfile)
+        print(*arguments, file=logfile)
 
 
-class toks:
+class Toks:
     """Class of sets of tokens from which functions read as in an input
     stream.
     """
 
     def __init__(self, file: io.TextIOWrapper) -> None:
-        """Construct a 'toks' from the given file: initialize a line buffer
+        """Construct a 'Toks' from the given file: initialize a line buffer
         containing the lines of the file, and initialize a set of imported
         files to a singleton containing that file, so as to avoid multiple
         imports.
@@ -254,11 +256,11 @@ class FrameStack(list[Frame]):
 
     def find_vars(self, stmt: Stmt) -> list[Var]:
         """Return the list of variables in the given statement."""
-        vars = []
+        var_list = []
         for x in stmt:
-            if x not in vars and self.lookup_v(x):
-                vars.append(x)
-        return vars
+            if x not in var_list and self.lookup_v(x):
+                var_list.append(x)
+        return var_list
 
     def make_assertion(self, stmt: Stmt) -> Assertion:
         """Return a quadruple (disjoint variable conditions, floating
@@ -309,7 +311,7 @@ class MM:
         self.begin_label = begin_label
         self.stop_label = stop_label
 
-    def read(self, toks: toks) -> None:
+    def read(self, toks: Toks) -> None:
         """Read the given token list to update the database and verify its
         proofs.
         """
@@ -363,8 +365,8 @@ class MM:
                     i = stmt.index('$=')
                     proof = stmt[i + 1:]
                     stmt = stmt[:i]
-                except ValueError:
-                    raise MMError('$p must contain a proof after $=')
+                except ValueError as exc:
+                    raise MMError('$p must contain a proof after $=') from exc
                 dvs, f_hyps, e_hyps, conclusion = self.fs.make_assertion(stmt)
                 if not self.begin_label:
                     vprint(2, 'verifying:', label)
@@ -423,10 +425,10 @@ class MM:
                 y_vars = self.fs.find_vars(subst[y])
                 vprint(16, 'V(x) =', x_vars)
                 vprint(16, 'V(y) =', y_vars)
-                for x, y in itertools.product(x_vars, y_vars):
-                    if x == y or not self.fs.lookup_d(x, y):
+                for x0, y0 in itertools.product(x_vars, y_vars):
+                    if x0 == y0 or not self.fs.lookup_d(x0, y0):
                         raise MMError("Disjoint variable violation: " +
-                                      "{0} , {1}".format(x, y))
+                                      "{0} , {1}".format(x0, y0))
             del stack[len(stack) - npop:]
             stack.append(apply_subst(conclusion0, subst))
         vprint(12, 'stack:', stack)
@@ -462,10 +464,10 @@ class MM:
         for ch in compressed_proof:
             if ch == 'Z':
                 proof_ints.append(-1)
-            elif 'A' <= ch and ch <= 'T':
+            elif 'A' <= ch <= 'T':
                 proof_ints.append(20 * cur_int + ord(ch) - 65)  # ord('A') = 65
                 cur_int = 0
-            else:  # 'U' <= ch and ch <= 'Y'
+            else:  # 'U' <= ch <= 'Y'
                 cur_int = 5 * cur_int + ord(ch) - 84  # ord('U') = 85
         vprint(5, 'proof_ints:', proof_ints)
         label_end = len(plabels)
@@ -477,7 +479,7 @@ class MM:
             vprint(10, 'stack:', stack)
             if proof_int == -1:  # save the current step for later
                 saved_stmts.append(stack[-1])
-            elif 0 <= proof_int and proof_int < label_end:
+            elif 0 <= proof_int < label_end:
                 # pf_int denotes an implicit hypothesis or a label in the label
                 # bloc
                 self.treat_step(self.labels[plabels[proof_int]], stack)
@@ -580,6 +582,6 @@ if __name__ == '__main__':
     vprint(1, 'mmverify.py -- Proof verifier for the Metamath language')
     mm = MM(args.begin_label, args.stop_label)
     vprint(1, 'Reading source file "{0}"...'.format(db_file.name))
-    mm.read(toks(db_file))
+    mm.read(Toks(db_file))
     vprint(1, 'No errors were found.')
     # mm.dump()
