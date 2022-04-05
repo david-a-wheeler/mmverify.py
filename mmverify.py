@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
-# mmverify.py -- Proof verifier for the Metamath language
-# Copyright (C) 2002 Raph Levien raph (at) acm (dot) org
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License
+"""mmverify.py -- Proof verifier for the Metamath language
+Copyright (C) 2002 Raph Levien raph (at) acm (dot) org
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License
 
-# To run the program, type
-#   $ python3 mmverify.py set.mm --logfile set.log
-# and set.log will have the verification results.  One can also use bash
-# redirections and type '$ python3 mmverify.py < set.mm 2> set.log' but this
-# would fail in case 'set.mm' contains (directly or not) a recursive inclusion
-# statement $[ set.mm $] .
-#
-# To get help on the program usage, type
-#   $ python3 mmverify.py -h
+To run the program, type
+  $ python3 mmverify.py set.mm --logfile set.log
+and set.log will have the verification results.  One can also use bash
+redirections and type '$ python3 mmverify.py < set.mm 2> set.log' but this
+would fail in case 'set.mm' contains (directly or not) a recursive inclusion
+statement $[ set.mm $] .
 
-# (nm 27-Jun-2005) mmverify.py requires that a $f hypothesis must not occur
-# after a $e hypothesis in the same scope, even though this is allowed by
-# the Metamath spec.  This is not a serious limitation since it can be
-# met by rearranging the hypothesis order.
-# (rl 2-Oct-2006) removed extraneous line found by Jason Orendorff
-# (sf 27-Jan-2013) ported to Python 3, added support for compressed proofs
-# and file inclusion
-# (bj 3-Apr-2022) streamline code and significant speedup (4x) by verifying
-# compressed proofs without converting them to normal format
+To get help on the program usage, type
+  $ python3 mmverify.py -h
+
+(nm 27-Jun-2005) mmverify.py requires that a $f hypothesis must not occur
+after a $e hypothesis in the same scope, even though this is allowed by
+the Metamath spec.  This is not a serious limitation since it can be
+met by rearranging the hypothesis order.
+(rl 2-Oct-2006) removed extraneous line found by Jason Orendorff
+(sf 27-Jan-2013) ported to Python 3, added support for compressed proofs
+and file inclusion
+(bj 3-Apr-2022) streamline code and significant speedup (4x) by verifying
+compressed proofs without converting them to normal format
+"""
 
 import sys
 import itertools
