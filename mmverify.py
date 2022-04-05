@@ -59,7 +59,7 @@ class MMKeyError(MMError, KeyError):
     pass
 
 
-def vprint(vlevel: int, *args) -> None:
+def vprint(vlevel: int, *args: typing.Any) -> None:
     """Print log message if verbosity level is higher than the argument."""
     if verbosity >= vlevel:
         print(*args, file=logfile)
@@ -153,10 +153,10 @@ class Frame:
         self.f: list[Fhyp] = []
         self.f_labels: dict[Var, Label] = {}
         self.e: list[Ehyp] = []
-        self.e_labels: dict[tuple[Symbol], Label] = {}
+        self.e_labels: dict[tuple[Symbol, ...], Label] = {}
 
 
-class FrameStack(list):
+class FrameStack(list[Frame]):
     """Class of frame stacks, which extends lists (considered and used as
     stacks).
     """
@@ -430,7 +430,7 @@ class MM:
             stack.append(apply_subst(conclusion0, subst))
         vprint(12, 'stack:', stack)
 
-    def treat_normal_proof(self, proof) -> list[Stmt]:
+    def treat_normal_proof(self, proof: list[str]) -> list[Stmt]:
         """Return the proof stack once the given normal proof has been
         processed.
         """
@@ -443,7 +443,7 @@ class MM:
             self,
             f_hyps: list[Fhyp],
             e_hyps: list[Ehyp],
-            proof) -> list[Stmt]:
+            proof: list[str]) -> list[Stmt]:
         """Return the proof stack once the given compressed proof for an
         assertion with the given $f and $e-hypotheses has been processed.
         """
@@ -493,7 +493,7 @@ class MM:
             f_hyps: list[Fhyp],
             e_hyps: list[Ehyp],
             conclusion: Stmt,
-            proof) -> None:
+            proof: list[str]) -> None:
         """Verify that the given proof (in normal or compressed format) is a
         correct proof of the given assertion.
         """
