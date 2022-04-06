@@ -21,8 +21,9 @@ met by rearranging the hypothesis order.
 (rl 2-Oct-2006) removed extraneous line found by Jason Orendorff
 (sf 27-Jan-2013) ported to Python 3, added support for compressed proofs
 and file inclusion
-(bj 3-Apr-2022) streamline code and significant speedup (4x) by verifying
-compressed proofs without converting them to normal format
+(bj 3-Apr-2022) streamlined code; obtained significant speedup (4x on set.mm)
+by verifying compressed proofs without converting them to normal proof format;
+added type hints
 """
 
 import sys
