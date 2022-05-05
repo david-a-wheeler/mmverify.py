@@ -267,8 +267,8 @@ class FrameStack(list[Frame]):
         e_hyps = [eh for fr in self for eh in fr.e]
         mand_vars = {tok for hyp in itertools.chain(e_hyps, [stmt])
                      for tok in hyp if self.lookup_v(tok)}
-        dvs = {(x, y) for fr in self for (x, y) in
-               fr.d.intersection(itertools.product(mand_vars, mand_vars))}
+        dvs = {(x, y) for fr in self for (x, y)
+               in fr.d if x in mand_vars and y in mand_vars}
         f_hyps = []
         # If one allows Metamath databases with multiple $f-statements for a
         # given var, then one should use "reversed" in the next two lines and
