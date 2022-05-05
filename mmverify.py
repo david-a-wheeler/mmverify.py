@@ -255,13 +255,9 @@ class FrameStack(list[Frame]):
                 pass
         raise MMKeyError(stmt_t)
 
-    def find_vars(self, stmt: Stmt) -> list[Var]:
-        """Return the list of variables in the given statement."""
-        var_list = []
-        for x in stmt:
-            if x not in var_list and self.lookup_v(x):
-                var_list.append(x)
-        return var_list
+    def find_vars(self, stmt: Stmt) -> set[Var]:
+        """Return the set of variables in the given statement."""
+        return {x for x in stmt if self.lookup_v(x)}
 
     def make_assertion(self, stmt: Stmt) -> Assertion:
         """Return a quadruple (disjoint variable conditions, floating
