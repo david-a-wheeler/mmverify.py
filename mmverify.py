@@ -281,8 +281,9 @@ class FrameStack(list[Frame]):
                 if var in mand_vars:
                     f_hyps.append((typecode, var))
                     mand_vars.remove(var)
-        vprint(18, 'make_assertion:', dvs, f_hyps, e_hyps, stmt)
-        return (dvs, f_hyps, e_hyps, stmt)
+        assertion = dvs, f_hyps, e_hyps, stmt
+        vprint(18, 'Make assertion:', assertion)
+        return assertion
 
 
 def apply_subst(stmt: Stmt, subst: dict[Var, Stmt]) -> Stmt:
@@ -371,7 +372,7 @@ class MM:
                          "(statement: {})").format(stmt)) from exc
                 dvs, f_hyps, e_hyps, conclusion = self.fs.make_assertion(stmt)
                 if not self.begin_label:
-                    vprint(2, 'verifying:', label)
+                    vprint(2, 'Verify:', label)
                     self.verify(f_hyps, e_hyps, conclusion, proof)
                 self.labels[label] = ('$p', (dvs, f_hyps, e_hyps, conclusion))
                 label = None
@@ -392,8 +393,8 @@ class MM:
         """Carry out the given proof step (given the label to treat and the
         current proof stack).  This modifies the given stack in place.
         """
+        vprint(10, 'Proof step:', step)
         steptyp, stepdat = step
-        vprint(10, 'Proof step:', steptyp, stepdat)
         if steptyp in ('$e', '$f'):
             stack.append(stepdat)
         elif steptyp in ('$a', '$p'):
@@ -462,8 +463,11 @@ class MM:
         idx_bloc = proof.index(')')  # index of end of label bloc
         plabels += proof[1:idx_bloc]  # labels which will be referenced later
         compressed_proof = ''.join(proof[idx_bloc + 1:])
-        vprint(5, 'labels:', plabels)
-        vprint(5, 'proof:', compressed_proof)
+        vprint(5, 'Referenced labels:', plabels)
+        label_end = len(plabels)
+        vprint(5, 'Number of referenced labels:', label_end)
+        vprint(5, 'Compressed p steps:', compressed_proof)
+        vprint(5, 'Number of steps:', len(compressed_proof))
         proof_ints = []  # integers referencing the labels in 'labels'
         cur_int = 0  # counter for radix conversion
         for ch in compressed_proof:
@@ -474,9 +478,7 @@ class MM:
                 cur_int = 0
             else:  # 'U' <= ch <= 'Y'
                 cur_int = 5 * cur_int + ord(ch) - 84  # ord('U') = 85
-        vprint(5, 'proof_ints:', proof_ints)
-        label_end = len(plabels)
-        vprint(5, 'label_end:', label_end)
+        vprint(5, 'Integer-coded steps:', proof_ints)
         # Processing of the proof
         stack: list[Stmt] = []  # proof stack
         # statements saved for later reuse (marked with a 'Z')
@@ -540,7 +542,7 @@ class MM:
         if stack[0] != conclusion:
             raise MMError(("Stack entry {} does not match proved " +
                           " assertion {}.").format(stack[0], conclusion))
-        vprint(3, 'Correct proof.')
+        vprint(3, 'Correct proof!')
 
     def dump(self) -> None:
         """Print the labels of the database."""
