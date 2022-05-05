@@ -476,7 +476,7 @@ class MM:
                 # bloc
                 self.treat_step(self.labels[plabels[proof_int]], stack)
             elif proof_int > n_saved_stmts:
-                MMError("Not enough saved subproofs.")
+                MMError("Not enough saved proof steps.")
             else:  # label_end <= proof_int <= n_saved_stmts
                 # proof_int denotes an earlier proof step marked with a 'Z'
                 # A proof step that has already been proved can be treated as
