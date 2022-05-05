@@ -464,16 +464,21 @@ class MM:
         stack: list[Stmt] = []  # proof stack
         # statements saved for later reuse (marked with a 'Z')
         saved_stmts = []
+        # can be recovered as len(saved_stmts) but less efficient
+        n_saved_stmts = 0
         for proof_int in proof_ints:
             vprint(10, 'stack:', stack)
             if proof_int == -1:  # save the current step for later
                 saved_stmts.append(stack[-1])
-            elif 0 <= proof_int < label_end:
-                # pf_int denotes an implicit hypothesis or a label in the label
+                n_saved_stmts += 1
+            elif proof_int < label_end:
+                # proof_int denotes an implicit hypothesis or a label in the label
                 # bloc
                 self.treat_step(self.labels[plabels[proof_int]], stack)
-            elif label_end <= proof_int:
-                # pf_int denotes an earlier proof step marked with a 'Z'
+            elif proof_int > n_saved_stmts:
+                MMError("Not enough saved subproofs.")
+            else:  # label_end <= proof_int <= n_saved_stmts
+                # proof_int denotes an earlier proof step marked with a 'Z'
                 # A proof step that has already been proved can be treated as
                 # a dv-free and hypothesis-free axiom.
                 self.treat_step(
