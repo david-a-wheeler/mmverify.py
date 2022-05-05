@@ -389,7 +389,8 @@ class MM:
             npop = len(f_hyps0) + len(e_hyps0)
             sp = len(stack) - npop
             if sp < 0:
-                raise MMError('stack underflow')
+                raise MMError(
+                    "stack underflow: proof step requires too many hypotheses")
             subst: dict[Var, Stmt] = {}
             for typecode, var in f_hyps0:
                 entry = stack[sp]
@@ -502,7 +503,10 @@ class MM:
         else:  # normal format
             stack = self.treat_normal_proof(proof)
         vprint(10, 'stack at end of proof:', stack)
-        if len(stack) != 1:
+        if not stack:
+            raise MMError(
+                "empty stack at end of proof")
+        if len(stack) > 1:
             raise MMError(
                 "Stack has more than one entry at end of proof (top " +
                 "entry: {0!s} ; proved assertion: {1!s}).".format(
@@ -511,6 +515,7 @@ class MM:
         if stack[0] != conclusion:
             raise MMError(("Stack entry {0!s} does not match proved " +
                           " assertion {1!s}").format(stack[0], conclusion))
+        vprint(3, 'correct proof')
 
     def dump(self) -> None:
         """Print the labels of the database."""
