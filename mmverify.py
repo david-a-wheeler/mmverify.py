@@ -185,7 +185,7 @@ class FrameStack(list[Frame]):
             raise MMError('var already defined as const and active')
         self[-1].v.add(tok)
 
-    def add_f(self, var: Var, typecode: Const, label: Label) -> None:
+    def add_f(self, typecode: Const, var: Var, label: Label) -> None:
         """Add a floating hypothesis (ordered pair (variable, typecode)) to
         the frame stack top.
         """
@@ -321,7 +321,7 @@ class MM:
                 if len(stmt) != 2:
                     raise MMError('$f must have length 2')
                 vprint(15, label, '$f', stmt[0], stmt[1], '$.')
-                self.fs.add_f(stmt[1], stmt[0], label)
+                self.fs.add_f(stmt[0], stmt[1], label)
                 self.labels[label] = ('$f', [stmt[0], stmt[1]])
                 label = None
             elif tok == '$e':
