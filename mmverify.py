@@ -185,21 +185,18 @@ class FrameStack(list[Frame]):
             raise MMError('var already defined as const and active')
         self[-1].v.add(tok)
 
-    def add_f(self, var: Var, kind: Const, label: Label) -> None:
-        """Add a floating hypothesis (ordered pair (variable, kind)) to the
-        frame stack top.
+    def add_f(self, var: Var, typecode: Const, label: Label) -> None:
+        """Add a floating hypothesis (ordered pair (variable, typecode)) to
+        the frame stack top.
         """
         if not self.lookup_v(var):
             raise MMError('var in $f not defined: {0}'.format(var))
-        if not self.lookup_c(kind):
-            raise MMError('const in $f not defined {0}'.format(kind))
-        frame = self[-1]
-        # The following line forbids multiple $f-statements for a given var.
-        # If that restriction is removed, then 'make_assertion' should be
-        # changed accordingly with the comment there.
+        if not self.lookup_c(typecode):
+            raise MMError('const in $f not defined: {0}'.format(typecode))
         if any(var in fr.f_labels.keys() for fr in self):
             raise MMError('var in $f already typed by an active $f-statement')
-        frame.f.append((var, kind))
+        frame = self[-1]
+        frame.f.append((var, typecode))
         frame.f_labels[var] = label
 
     def add_e(self, stmt: Stmt, label: Label) -> None:
@@ -270,16 +267,11 @@ class FrameStack(list[Frame]):
         dvs = {(x, y) for fr in self for (x, y)
                in fr.d if x in mand_vars and y in mand_vars}
         f_hyps = []
-        # If one allows Metamath databases with multiple $f-statements for a
-        # given var, then one should use "reversed" in the next two lines and
-        # use 'appendleft' from 'collections.deque' to get the latest f_hyp
-        # corresponding to the given var.
-        # The current version of 'add_f' forbids such multiple $f-statements.
         for fr in self:
-            for v, k in fr.f:
-                if v in mand_vars:
-                    f_hyps.append((k, v))
-                    mand_vars.remove(v)
+            for var, typecode in fr.f:
+                if var in mand_vars:
+                    f_hyps.append((typecode, var))
+                    mand_vars.remove(var)
         vprint(18, 'make_assertion:', dvs, f_hyps, e_hyps, stmt)
         return (dvs, f_hyps, e_hyps, stmt)
 
