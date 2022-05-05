@@ -398,7 +398,6 @@ class MM:
             stack.append(stepdat)
         elif steptyp in ('$a', '$p'):
             dvs0, f_hyps0, e_hyps0, conclusion0 = stepdat
-            vprint(12, stepdat)
             npop = len(f_hyps0) + len(e_hyps0)
             sp = len(stack) - npop
             if sp < 0:
@@ -416,7 +415,7 @@ class MM:
                          "hypothesis ({}, {}).").format(entry, typecode, var))
                 subst[var] = entry[1:]
                 sp += 1
-            vprint(15, 'Substitution:', subst)
+            vprint(15, 'Substitution to apply:', subst)
             for h in e_hyps0:
                 entry = stack[sp]
                 subst_h = apply_subst(h, subst)
@@ -477,6 +476,7 @@ class MM:
                 cur_int = 5 * cur_int + ord(ch) - 84  # ord('U') = 85
         vprint(5, 'proof_ints:', proof_ints)
         label_end = len(plabels)
+        vprint(5, 'label_end:', label_end)
         # Processing of the proof
         stack: list[Stmt] = []  # proof stack
         # statements saved for later reuse (marked with a 'Z')
@@ -485,25 +485,29 @@ class MM:
         n_saved_stmts = 0
         for proof_int in proof_ints:
             if proof_int == -1:  # save the current step for later reuse
-                saved_stmts.append(stack[-1])
+                stmt = stack[-1]
+                vprint(15, 'Saving step', stmt)
+                saved_stmts.append(stmt)
                 n_saved_stmts += 1
             elif proof_int < label_end:
                 # proof_int denotes an implicit hypothesis or a label in the
                 # label bloc
                 self.treat_step(self.labels[plabels[proof_int]], stack)
-            elif proof_int > n_saved_stmts:
+            elif proof_int >= label_end + n_saved_stmts:
                 MMError(
                     "Not enough saved proof steps ({} saved but calling " +
                     "the {}th).".format(
                         n_saved_stmts,
                         proof_int))
-            else:  # label_end <= proof_int <= n_saved_stmts
+            else:  # label_end <= proof_int < label_end + n_saved_stmts
                 # proof_int denotes an earlier proof step marked with a 'Z'
                 # A proof step that has already been proved can be treated as
                 # a dv-free and hypothesis-free axiom.
+                stmt = saved_stmts[proof_int - label_end]
+                vprint(15, 'Reusing step', stmt)
                 self.treat_step(
                     ('$a',
-                     (set(), [], [], saved_stmts[proof_int - label_end])),
+                     (set(), [], [], stmt)),
                     stack)
         return stack
 
