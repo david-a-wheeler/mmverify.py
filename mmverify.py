@@ -466,7 +466,7 @@ class MM:
         vprint(5, 'Referenced labels:', plabels)
         label_end = len(plabels)
         vprint(5, 'Number of referenced labels:', label_end)
-        vprint(5, 'Compressed p steps:', compressed_proof)
+        vprint(5, 'Compressed proof steps:', compressed_proof)
         vprint(5, 'Number of steps:', len(compressed_proof))
         proof_ints = []  # integers referencing the labels in 'labels'
         cur_int = 0  # counter for radix conversion
