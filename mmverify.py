@@ -107,10 +107,13 @@ class Toks:
         while tok == '$[':
             filename = self.read()
             if not filename:
-                raise MMError('Inclusion command not terminated')
+                raise MMError(
+                    "Inclusion command not terminated (EOF after '$[').")
             endbracket = self.read()
             if endbracket != '$]':
-                raise MMError('Inclusion command not terminated')
+                raise MMError(
+                    ("Inclusion command for file {} not " +
+                     "terminated.").format(filename))
             file = pathlib.Path(filename).resolve()
             if file not in self.imported_files:
                 self.lines_buf.append(open(file, mode='r', encoding='ascii'))
@@ -140,7 +143,7 @@ class Toks:
         tok = self.readc()
         while tok != '$.':
             if tok is None:
-                raise MMError('EOF before $.')
+                raise MMError("EOF before '$.'.")
             stmt.append(tok)
             tok = self.readc()
         return stmt
@@ -172,17 +175,20 @@ class FrameStack(list[Frame]):
     def add_c(self, tok: Const) -> None:
         """Add a constant to the frame stack top.  Allow local definitions."""
         if self.lookup_c(tok):
-            raise MMError('const already defined and active')
+            raise MMError(
+                'const already declared (hence active): {}'.format(tok))
         if self.lookup_v(tok):
-            raise MMError('const already defined as var and active')
+            raise MMError(
+                'const already declared as var and active: {}'.format(tok))
         self[-1].c.add(tok)
 
     def add_v(self, tok: Var) -> None:
         """Add a variable to the frame stack top.  Allow local definitions."""
         if self.lookup_v(tok):
-            raise MMError('var already defined and active')
+            raise MMError('var already declared and active: {}'.format(tok))
         if self.lookup_c(tok):
-            raise MMError('var already defined as const and active')
+            raise MMError(
+                'var already declared as const and active: {}'.format(tok))
         self[-1].v.add(tok)
 
     def add_f(self, typecode: Const, var: Var, label: Label) -> None:
@@ -190,11 +196,13 @@ class FrameStack(list[Frame]):
         the frame stack top.
         """
         if not self.lookup_v(var):
-            raise MMError('var in $f not defined: {0}'.format(var))
+            raise MMError('var in $f not declared: {}'.format(var))
         if not self.lookup_c(typecode):
-            raise MMError('const in $f not defined: {0}'.format(typecode))
+            raise MMError('typecode in $f not declared: {}'.format(typecode))
         if any(var in fr.f_labels.keys() for fr in self):
-            raise MMError('var in $f already typed by an active $f-statement')
+            raise MMError(
+                ("var in $f already typed by an active " +
+                 "$f-statement: {}").format(var))
         frame = self[-1]
         frame.f.append((typecode, var))
         frame.f_labels[var] = label
@@ -213,7 +221,8 @@ class FrameStack(list[Frame]):
         the frame stack top.
         """
         self[-1].d.update((min(x, y), max(x, y))
-                          for x, y in itertools.product(varlist, varlist) if x != y)
+                          for x, y in itertools.product(varlist, varlist)
+                          if x != y)
 
     def lookup_c(self, tok: Const) -> bool:
         """Return whether the given token is an active constant."""
@@ -317,9 +326,11 @@ class MM:
             elif tok == '$f':
                 stmt = toks.readstmt()
                 if not label:
-                    raise MMError('$f must have label')
+                    raise MMError(
+                        '$f must have label (statement: {})'.format(stmt))
                 if len(stmt) != 2:
-                    raise MMError('$f must have length 2')
+                    raise MMError(
+                        '$f must have length two but is {}'.format(stmt))
                 vprint(15, label, '$f', stmt[0], stmt[1], '$.')
                 self.fs.add_f(stmt[0], stmt[1], label)
                 self.labels[label] = ('$f', [stmt[0], stmt[1]])
@@ -355,7 +366,9 @@ class MM:
                     proof = stmt[i + 1:]
                     stmt = stmt[:i]
                 except ValueError as exc:
-                    raise MMError('$p must contain a proof after $=') from exc
+                    raise MMError(
+                        ("$p must contain a proof after '$=' " +
+                         "(statement: {})").format(stmt)) from exc
                 dvs, f_hyps, e_hyps, conclusion = self.fs.make_assertion(stmt)
                 if not self.begin_label:
                     vprint(2, 'verifying:', label)
@@ -369,7 +382,7 @@ class MM:
             elif tok[0] != '$':
                 label = tok
             else:
-                print('Unknown token:', tok)
+                vprint(1, 'Unknown token:', tok)
             tok = toks.readc()
         self.fs.pop()
 
@@ -380,7 +393,7 @@ class MM:
         current proof stack).  This modifies the given stack in place.
         """
         steptyp, stepdat = step
-        vprint(10, 'step', steptyp, stepdat)
+        vprint(10, 'Proof step:', steptyp, stepdat)
         if steptyp in ('$e', '$f'):
             stack.append(stepdat)
         elif steptyp in ('$a', '$p'):
@@ -390,23 +403,26 @@ class MM:
             sp = len(stack) - npop
             if sp < 0:
                 raise MMError(
-                    "stack underflow: proof step requires too many hypotheses")
+                    ("Stack underflow: proof step {} requires too many " +
+                     "({}) hypotheses.").format(
+                        step,
+                        npop))
             subst: dict[Var, Stmt] = {}
             for typecode, var in f_hyps0:
                 entry = stack[sp]
                 if entry[0] != typecode:
                     raise MMError(
-                        ("stack entry {2!s} does not match floating " +
-                         "hypothesis ({0}, {1})").format(entry, typecode, var))
+                        ("Proof stack entry {} does not match floating " +
+                         "hypothesis ({}, {}).").format(entry, typecode, var))
                 subst[var] = entry[1:]
                 sp += 1
-            vprint(15, 'subst:', subst)
+            vprint(15, 'Substitution:', subst)
             for h in e_hyps0:
                 entry = stack[sp]
                 subst_h = apply_subst(h, subst)
                 if entry != subst_h:
-                    raise MMError(("stack entry {0!s} does not match " +
-                                   "essential hypothesis {1!s}")
+                    raise MMError(("Proof stack entry {} does not match " +
+                                   "essential hypothesis {}.")
                                   .format(entry, subst_h))
                 sp += 1
             for x, y in dvs0:
@@ -418,10 +434,10 @@ class MM:
                 for x0, y0 in itertools.product(x_vars, y_vars):
                     if x0 == y0 or not self.fs.lookup_d(x0, y0):
                         raise MMError("Disjoint variable violation: " +
-                                      "{0} , {1}".format(x0, y0))
+                                      "{} , {}".format(x0, y0))
             del stack[len(stack) - npop:]
             stack.append(apply_subst(conclusion0, subst))
-        vprint(12, 'stack:', stack)
+        vprint(12, 'Proof stack:', stack)
 
     def treat_normal_proof(self, proof: list[str]) -> list[Stmt]:
         """Return the proof stack once the given normal proof has been
@@ -468,22 +484,27 @@ class MM:
         # can be recovered as len(saved_stmts) but less efficient
         n_saved_stmts = 0
         for proof_int in proof_ints:
-            vprint(10, 'stack:', stack)
-            if proof_int == -1:  # save the current step for later
+            if proof_int == -1:  # save the current step for later reuse
                 saved_stmts.append(stack[-1])
                 n_saved_stmts += 1
             elif proof_int < label_end:
-                # proof_int denotes an implicit hypothesis or a label in the label
-                # bloc
+                # proof_int denotes an implicit hypothesis or a label in the
+                # label bloc
                 self.treat_step(self.labels[plabels[proof_int]], stack)
             elif proof_int > n_saved_stmts:
-                MMError("Not enough saved proof steps.")
+                MMError(
+                    "Not enough saved proof steps ({} saved but calling " +
+                    "the {}th).".format(
+                        n_saved_stmts,
+                        proof_int))
             else:  # label_end <= proof_int <= n_saved_stmts
                 # proof_int denotes an earlier proof step marked with a 'Z'
                 # A proof step that has already been proved can be treated as
                 # a dv-free and hypothesis-free axiom.
                 self.treat_step(
-                    ('$a', (set(), [], [], saved_stmts[proof_int - label_end])), stack)
+                    ('$a',
+                     (set(), [], [], saved_stmts[proof_int - label_end])),
+                    stack)
         return stack
 
     def verify(
@@ -502,20 +523,20 @@ class MM:
             stack = self.treat_compressed_proof(f_hyps, e_hyps, proof)
         else:  # normal format
             stack = self.treat_normal_proof(proof)
-        vprint(10, 'stack at end of proof:', stack)
+        vprint(10, 'Stack at end of proof:', stack)
         if not stack:
             raise MMError(
-                "empty stack at end of proof")
+                "Empty stack at end of proof.")
         if len(stack) > 1:
             raise MMError(
                 "Stack has more than one entry at end of proof (top " +
-                "entry: {0!s} ; proved assertion: {1!s}).".format(
+                "entry: {} ; proved assertion: {}).".format(
                     stack[0],
                     conclusion))
         if stack[0] != conclusion:
-            raise MMError(("Stack entry {0!s} does not match proved " +
-                          " assertion {1!s}").format(stack[0], conclusion))
-        vprint(3, 'correct proof')
+            raise MMError(("Stack entry {} does not match proved " +
+                          " assertion {}.").format(stack[0], conclusion))
+        vprint(3, 'Correct proof.')
 
     def dump(self) -> None:
         """Print the labels of the database."""
@@ -580,7 +601,7 @@ if __name__ == '__main__':
     logfile = args.logfile
     vprint(1, 'mmverify.py -- Proof verifier for the Metamath language')
     mm = MM(args.begin_label, args.stop_label)
-    vprint(1, 'Reading source file "{0}"...'.format(db_file.name))
+    vprint(1, 'Reading source file "{}"...'.format(db_file.name))
     mm.read(Toks(db_file))
     vprint(1, 'No errors were found.')
     # mm.dump()
