@@ -196,7 +196,7 @@ class FrameStack(list[Frame]):
         if any(var in fr.f_labels.keys() for fr in self):
             raise MMError('var in $f already typed by an active $f-statement')
         frame = self[-1]
-        frame.f.append((var, typecode))
+        frame.f.append((typecode, var))
         frame.f_labels[var] = label
 
     def add_e(self, stmt: Stmt, label: Label) -> None:
@@ -268,7 +268,7 @@ class FrameStack(list[Frame]):
                in fr.d if x in mand_vars and y in mand_vars}
         f_hyps = []
         for fr in self:
-            for var, typecode in fr.f:
+            for typecode, var in fr.f:
                 if var in mand_vars:
                     f_hyps.append((typecode, var))
                     mand_vars.remove(var)
@@ -391,13 +391,13 @@ class MM:
             if sp < 0:
                 raise MMError('stack underflow')
             subst: dict[Var, Stmt] = {}
-            for k, v in f_hyps0:
+            for typecode, var in f_hyps0:
                 entry = stack[sp]
-                if entry[0] != k:
+                if entry[0] != typecode:
                     raise MMError(
                         ("stack entry {2!s} does not match floating " +
-                         "hypothesis ({0}, {1})").format(entry, k, v))
-                subst[v] = entry[1:]
+                         "hypothesis ({0}, {1})").format(entry, typecode, var))
+                subst[var] = entry[1:]
                 sp += 1
             vprint(15, 'subst:', subst)
             for h in e_hyps0:
