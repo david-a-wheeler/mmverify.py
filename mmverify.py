@@ -297,8 +297,7 @@ def apply_subst(stmt: Stmt, subst: dict[Var, Stmt]) -> Stmt:
             result += subst[tok]
         else:
             result.append(tok)
-    vprint(20, 'Applying substitution', subst,
-           'to statement', stmt, 'results in', result)
+    vprint(20, 'Applying substitution', subst, 'to statement', stmt, 'results in', result)
     return result
 
 
