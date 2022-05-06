@@ -146,6 +146,7 @@ class Toks:
                 raise MMError("EOF before '$.'.")
             stmt.append(tok)
             tok = self.readc()
+        vprint(20, 'Statement:', stmt)
         return stmt
 
 
@@ -296,7 +297,8 @@ def apply_subst(stmt: Stmt, subst: dict[Var, Stmt]) -> Stmt:
             result += subst[tok]
         else:
             result.append(tok)
-    vprint(20, 'apply_subst:', stmt, subst, '=', result)
+    vprint(20, 'Applying substitution', subst,
+           'to statement', stmt, 'results in', result)
     return result
 
 
@@ -332,7 +334,6 @@ class MM:
                 if len(stmt) != 2:
                     raise MMError(
                         '$f must have length two but is {}'.format(stmt))
-                vprint(15, label, '$f', stmt[0], stmt[1], '$.')
                 self.fs.add_f(stmt[0], stmt[1], label)
                 self.labels[label] = ('$f', [stmt[0], stmt[1]])
                 label = None
@@ -346,20 +347,12 @@ class MM:
             elif tok == '$a':
                 if not label:
                     raise MMError('$a must have label')
-                if label == self.stop_label:
-                    sys.exit(0)
-                if label == self.begin_label:
-                    self.begin_label = None
                 self.labels[label] = ('$a',
                                       self.fs.make_assertion(toks.readstmt()))
                 label = None
             elif tok == '$p':
                 if not label:
                     raise MMError('$p must have label')
-                if label == self.stop_label:
-                    sys.exit(0)
-                if label == self.begin_label:
-                    self.begin_label = None
                 stmt = toks.readstmt()
                 proof = None
                 try:
@@ -382,6 +375,11 @@ class MM:
                 self.read(toks)
             elif tok[0] != '$':
                 label = tok
+                vprint(20, 'Label:', label)
+                if label == self.stop_label:
+                    sys.exit(0)
+                if label == self.begin_label:
+                    self.begin_label = None
             else:
                 vprint(1, 'Unknown token:', tok)
             tok = toks.readc()
@@ -593,14 +591,14 @@ if __name__ == '__main__':
         '--begin-label',
         dest='begin_label',
         type=str,
-        help="""assertion label where to begin verifying proofs (included,
-          provided it is a provable statement)""")
+        help="""label where to begin verifying proofs (included, if it is a
+          provable statement)""")
     parser.add_argument(
         '-s',
         '--stop-label',
         dest='stop_label',
         type=str,
-        help='assertion label where to stop verifying proofs (not included)')
+        help='label where to stop verifying proofs (not included)')
     args = parser.parse_args()
     verbosity = args.verbosity
     db_file = args.database
