@@ -382,6 +382,8 @@ class MM:
                     self.begin_label = None
             else:
                 vprint(1, 'Unknown token:', tok)
+                # next line to avoid empty bloc when 'vprint' lines are automatically removed
+                return
             tok = toks.readc()
         self.fs.pop()
 
