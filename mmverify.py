@@ -1,369 +1,637 @@
 #!/usr/bin/env python3
-# mmverify.py -- Proof verifier for the Metamath language
-# Copyright (C) 2002 Raph Levien raph (at) acm (dot) org
+"""mmverify.py -- Proof verifier for the Metamath language
+Copyright (C) 2002 Raph Levien raph (at) acm (dot) org
 # This program is free software distributed under the MIT license;
 # see the file LICENSE for full license information.
 
-# To run the program, type
-#   $ python3 mmverify.py < set.mm 2> set.log
-# and set.log will have the verification results.
+To run the program, type
+  $ python3 mmverify.py set.mm --logfile set.log
+and set.log will have the verification results.  One can also use bash
+redirections and type '$ python3 mmverify.py < set.mm 2> set.log' but this
+would fail in case 'set.mm' contains (directly or not) a recursive inclusion
+statement $[ set.mm $] .
 
-# (nm 27-Jun-2005) mmverify.py requires that a $f hypothesis must not occur
-# after a $e hypothesis in the same scope, even though this is allowed by
-# the Metamath spec.  This is not a serious limitation since it can be
-# met by rearranging the hypothesis order.
-# (rl 2-Oct-2006) removed extraneous line found by Jason Orendorff
-# (sf 27-Jan-2013) ported to Python 3, added support for compressed proofs
-# and file inclusion
+To get help on the program usage, type
+  $ python3 mmverify.py -h
+
+(nm 27-Jun-2005) mmverify.py requires that a $f hypothesis must not occur
+after a $e hypothesis in the same scope, even though this is allowed by
+the Metamath spec.  This is not a serious limitation since it can be
+met by rearranging the hypothesis order.
+(rl 2-Oct-2006) removed extraneous line found by Jason Orendorff
+(sf 27-Jan-2013) ported to Python 3, added support for compressed proofs
+and file inclusion
+(bj 3-Apr-2022) streamlined code; obtained significant speedup (4x on set.mm)
+by verifying compressed proofs without converting them to normal proof format;
+added type hints
+"""
 
 import sys
 import itertools
-import collections
-import os.path
-from optparse import OptionParser
+import pathlib
+import argparse
+import typing
+import io
 
-verbosity = 1
+Label = str
+Var = str
+Const = str
+Steptyp = str  # can actually be one of '$e', '$f', '$a', '$p'
+StringOption = typing.Optional[str]
+Symbol = typing.Union[Var, Const]
+Stmt = list[Symbol]
+Ehyp = Stmt
+Fhyp = tuple[Var, Const]
+Dv = tuple[Var, Var]
+Assertion = tuple[set[Dv], list[Fhyp], list[Ehyp], Stmt]
+FullStmt = tuple[Steptyp, typing.Union[Stmt, Assertion]]
+# Actually, the second component of a FullStmt is a Stmt when its first
+# component is '$e' or '$f' and an Assertion if its first component is '$a' or
+# '$p', but this is a bit cumbersome to build it into the typing system.
+# This explains the errors when static type checking (e.g., mypy): an
+# if-statement determines in which case we are, but this is invisible to the
+# type checker.
 
-class MMError(Exception): pass
-class MMKeyError(MMError, KeyError): pass
+# Note: a script at github.com/metamath/set.mm removes from the following code
+# the lines beginning with (spaces followed by) 'vprint(' using the command
+#   $ sed -E '/^ *vprint\(/d' mmverify.py > mmverify.faster.py
+# In order that mmverify.faster.py be valid, one must therefore not break
+# 'vprint' commands over multiple lines, nor have indented blocs containing
+# only vprint lines (this would create ill-indented files).
 
-def vprint(vlevel, *args):
-    if verbosity >= vlevel: print(*args, file=sys.stderr)
 
-class toks:
-    def __init__(self, lines):
-        self.lines_buf = [lines]
-        self.tokbuf = []
-        self.imported_files = set()
+class MMError(Exception):
+    """Class of Metamath errors."""
+    pass
 
-    def read(self):
-        while self.tokbuf == []:
-            line = self.lines_buf[-1].readline()
-            if not line:
-                self.lines_buf.pop().close()
-                if not self.lines_buf: return None
+
+class MMKeyError(MMError, KeyError):
+    """Class of Metamath key errors."""
+    pass
+
+
+def vprint(vlevel: int, *arguments: typing.Any) -> None:
+    """Print log message if verbosity level is higher than the argument."""
+    if verbosity >= vlevel:
+        print(*arguments, file=logfile)
+
+
+class Toks:
+    """Class of sets of tokens from which functions read as in an input
+    stream.
+    """
+
+    def __init__(self, file: io.TextIOWrapper) -> None:
+        """Construct a 'Toks' from the given file: initialize a line buffer
+        containing the lines of the file, and initialize a set of imported
+        files to a singleton containing that file, so as to avoid multiple
+        imports.
+        """
+        self.lines_buf = [file]
+        self.tokbuf: list[str] = []
+        self.imported_files = set({pathlib.Path(file.name).resolve()})
+
+    def read(self) -> StringOption:
+        """Read the next token in the token buffer, or if it is empty, split
+        the next line into tokens and read from it."""
+        while not self.tokbuf:
+            if self.lines_buf:
+                line = self.lines_buf[-1].readline()
             else:
+                return None
+            if line:
                 self.tokbuf = line.split()
                 self.tokbuf.reverse()
-        return self.tokbuf.pop()
+            else:
+                self.lines_buf.pop().close()
+                if not self.lines_buf:
+                    return None
+        tok = self.tokbuf.pop()
+        vprint(90, "Token:", tok)
+        return tok
 
-    def readf(self):
+    def readf(self) -> StringOption:
+        """Read the next token once included files have been expanded.  In the
+        latter case, the path/name of the expanded file is added to the set of
+        imported files so as to avoid multiple imports.
+        """
         tok = self.read()
         while tok == '$[':
             filename = self.read()
+            if not filename:
+                raise MMError(
+                    "Unclosed inclusion statement at end of file.")
             endbracket = self.read()
             if endbracket != '$]':
-                raise MMError('Incusion command not terminated')
-            filename = os.path.realpath(filename)
-            if filename not in self.imported_files:
-                self.lines_buf.append(open(filename, 'r'))
-                self.imported_files.add(filename)
+                raise MMError(
+                    ("Inclusion statement for file {} not " +
+                     "closed with a '$]'.").format(filename))
+            file = pathlib.Path(filename).resolve()
+            if file not in self.imported_files:
+                self.lines_buf.append(open(file, mode='r', encoding='ascii'))
+                self.imported_files.add(file)
+                vprint(5, 'Importing file:', filename)
             tok = self.read()
+        vprint(80, "Token once included files expanded:", tok)
         return tok
 
-    def readc(self):
-        while 1:
-            tok = self.readf()
-            if tok == None: return None
-            if tok == '$(':
-                while tok != '$)':
+    def readc(self) -> StringOption:
+        """Read the next token once included files have been expanded and
+        comments have been skipped.
+        """
+        tok = self.readf()
+        while tok == '$(':
+            # Note that we use 'read' in this while-loop, and not 'readf',
+            # since inclusion statements within a comment are still comments
+            # so should be skipped.
+            # The following line is not necessary but makes things clearer;
+            # note the similarity with the first three lines of 'readf'.
+            tok = self.read()
+            while tok != '$)':
+                if tok:
                     tok = self.read()
-            else:
-                return tok
+                else:
+                    raise MMError("Unclosed comment at end of file.")
+            tok = self.read()
+        vprint(70, "Token once comments skipped:", tok)
+        return tok
 
-    def readstat(self):
-        stat = []
+    def readstmt(self, str) -> Stmt:
+        """Read tokens from the input (assumed to be at the beginning of a
+        statement) and return the list of tokens until the next end-statement
+        token '$.'.
+        """
+        stmt = []
         tok = self.readc()
         while tok != '$.':
-            if tok == None: raise MMError('EOF before $.')
-            stat.append(tok)
+            if not tok:
+                raise MMError(
+                    "Unclosed {}-statement at end of file.".format(str))
+            stmt.append(tok)
             tok = self.readc()
-        return stat
+        vprint(20, 'Statement:', stmt)
+        return stmt
+
 
 class Frame:
-    def __init__(self):
-        self.c = set()
-        self.v = set()
-        self.d = set()
-        self.f = []
-        self.f_labels = {}
-        self.e = []
-        self.e_labels = {}
+    """Class of frames, keeping track of the environment."""
 
-class FrameStack(list):
-    def push(self):
+    def __init__(self) -> None:
+        """Construct an empty frame."""
+        self.c: set[Const] = set()
+        self.v: set[Var] = set()
+        self.d: set[Dv] = set()
+        self.f: list[Fhyp] = []
+        self.f_labels: dict[Var, Label] = {}
+        self.e: list[Ehyp] = []
+        self.e_labels: dict[tuple[Symbol, ...], Label] = {}
+
+
+class FrameStack(list[Frame]):
+    """Class of frame stacks, which extends lists (considered and used as
+    stacks).
+    """
+
+    def push(self) -> None:
+        """Push an empty frame to the stack."""
         self.append(Frame())
 
-    def add_c(self, tok):
-        frame = self[-1]
-        if tok in frame.c: raise MMError('const already defined in scope')
-        if tok in frame.v:
-            raise MMError('const already defined as var in scope')
-        frame.c.add(tok)
+    def add_c(self, tok: Const) -> None:
+        """Add a constant to the frame stack top.  Allow local definitions."""
+        if self.lookup_c(tok):
+            raise MMError(
+                'const already declared (hence active): {}'.format(tok))
+        if self.lookup_v(tok):
+            raise MMError(
+                'const already declared as var and active: {}'.format(tok))
+        self[-1].c.add(tok)
 
-    def add_v(self, tok):
-        frame = self[-1]
-        if tok in frame.v: raise MMError('var already defined in scope')
-        if tok in frame.c:
-            raise MMError('var already defined as const in scope')
-        frame.v.add(tok)
+    def add_v(self, tok: Var) -> None:
+        """Add a variable to the frame stack top.  Allow local definitions."""
+        if self.lookup_v(tok):
+            raise MMError('var already declared and active: {}'.format(tok))
+        if self.lookup_c(tok):
+            raise MMError(
+                'var already declared as const and active: {}'.format(tok))
+        self[-1].v.add(tok)
 
-    def add_f(self, var, kind, label):
+    def add_f(self, typecode: Const, var: Var, label: Label) -> None:
+        """Add a floating hypothesis (ordered pair (variable, typecode)) to
+        the frame stack top.
+        """
         if not self.lookup_v(var):
-            raise MMError('var in $f not defined: {0}'.format(var))
-        if not self.lookup_c(kind):
-            raise MMError('const in $f not defined {0}'.format(kind))
+            raise MMError('var in $f not declared: {}'.format(var))
+        if not self.lookup_c(typecode):
+            raise MMError('typecode in $f not declared: {}'.format(typecode))
+        if any(var in fr.f_labels.keys() for fr in self):
+            raise MMError(
+                ("var in $f already typed by an active " +
+                 "$f-statement: {}").format(var))
         frame = self[-1]
-        if var in frame.f_labels.keys():
-            raise MMError('var in $f already defined in scope')
-        frame.f.append((var, kind))
+        frame.f.append((typecode, var))
         frame.f_labels[var] = label
 
-    def add_e(self, stat, label):
+    def add_e(self, stmt: Stmt, label: Label) -> None:
+        """Add an essential hypothesis (token tuple) to the frame stack
+        top.
+        """
         frame = self[-1]
-        frame.e.append(stat)
-        frame.e_labels[tuple(stat)] = label
+        frame.e.append(stmt)
+        frame.e_labels[tuple(stmt)] = label
+        # conversion to tuple since dictionary keys must be hashable
 
-    def add_d(self, stat):
-        frame = self[-1]
-        frame.d.update(((min(x,y), max(x,y))
-                        for x, y in itertools.product(stat, stat) if x != y))
+    def add_d(self, varlist: list[Var]) -> None:
+        """Add a disjoint variable condition (ordered pair of variables) to
+        the frame stack top.
+        """
+        self[-1].d.update((min(x, y), max(x, y))
+                          for x, y in itertools.product(varlist, varlist)
+                          if x != y)
 
-    def lookup_c(self, tok): return any((tok in fr.c for fr in reversed(self)))
-    def lookup_v(self, tok): return any((tok in fr.v for fr in reversed(self)))
+    def lookup_c(self, tok: Const) -> bool:
+        """Return whether the given token is an active constant."""
+        return any(tok in fr.c for fr in self)
 
-    def lookup_f(self, var):
-        for frame in reversed(self):
-            try: return frame.f_labels[var]
-            except KeyError: pass
+    def lookup_v(self, tok: Var) -> bool:
+        """Return whether the given token is an active variable."""
+        return any(tok in fr.v for fr in self)
+
+    def lookup_d(self, x: Var, y: Var) -> bool:
+        """Return whether the given ordered pair of tokens belongs to an
+        active disjoint variable statement.
+        """
+        return any((min(x, y), max(x, y)) in fr.d for fr in self)
+
+    def lookup_f(self, var: Var) -> Label:
+        """Return the label of the active floating hypothesis which types the
+        given variable.
+        """
+        for frame in self:
+            try:
+                return frame.f_labels[var]
+            except KeyError:
+                pass
         raise MMKeyError(var)
 
-    def lookup_d(self, x, y):
-        return any(((min(x,y), max(x,y)) in fr.d for fr in reversed(self)))
-
-    def lookup_e(self, stmt):
+    def lookup_e(self, stmt: Stmt) -> Label:
+        """Return the label of the (earliest) active essential hypothesis with
+        the given statement.
+        """
         stmt_t = tuple(stmt)
-        for frame in reversed(self):
-            try: return frame.e_labels[stmt_t]
-            except KeyError: pass
+        for frame in self:
+            try:
+                return frame.e_labels[stmt_t]
+            except KeyError:
+                pass
         raise MMKeyError(stmt_t)
 
-    def make_assertion(self, stat):
-        frame = self[-1]
+    def find_vars(self, stmt: Stmt) -> set[Var]:
+        """Return the set of variables in the given statement."""
+        return {x for x in stmt if self.lookup_v(x)}
+
+    def make_assertion(self, stmt: Stmt) -> Assertion:
+        """Return a quadruple (disjoint variable conditions, floating
+        hypotheses, essential hypotheses, conclusion) describing the given
+        assertion.
+        """
         e_hyps = [eh for fr in self for eh in fr.e]
-        mand_vars = {tok for hyp in itertools.chain(e_hyps, [stat])
-                         for tok in hyp if self.lookup_v(tok)}
+        mand_vars = {tok for hyp in itertools.chain(e_hyps, [stmt])
+                     for tok in hyp if self.lookup_v(tok)}
+        dvs = {(x, y) for fr in self for (x, y)
+               in fr.d if x in mand_vars and y in mand_vars}
+        f_hyps = []
+        for fr in self:
+            for typecode, var in fr.f:
+                if var in mand_vars:
+                    f_hyps.append((typecode, var))
+                    mand_vars.remove(var)
+        assertion = dvs, f_hyps, e_hyps, stmt
+        vprint(18, 'Make assertion:', assertion)
+        return assertion
 
-        dvs = {(x,y) for fr in self for (x,y) in
-               fr.d.intersection(itertools.product(mand_vars, mand_vars))}
 
-        f_hyps = collections.deque()
-        for fr in reversed(self):
-            for v, k in reversed(fr.f):
-                if v in mand_vars:
-                    f_hyps.appendleft((k, v))
-                    mand_vars.remove(v)
+def apply_subst(stmt: Stmt, subst: dict[Var, Stmt]) -> Stmt:
+    """Return the token list resulting from the given substitution
+    (dictionary) applied to the given statement (token list).
+    """
+    result = []
+    for tok in stmt:
+        if tok in subst:
+            result += subst[tok]
+        else:
+            result.append(tok)
+    vprint(20, 'Applying subst', subst, 'to stmt', stmt, ':', result)
+    return result
 
-        vprint(18, 'ma:', (dvs, f_hyps, e_hyps, stat))
-        return (dvs, f_hyps, e_hyps, stat)
 
 class MM:
-    def __init__(self, begin_label, stop_label):
+    """Class of ("abstract syntax trees" describing) Metamath databases."""
+
+    def __init__(self, begin_label: Label, stop_label: Label) -> None:
+        """Construct an empty Metamath database."""
         self.fs = FrameStack()
-        self.labels = {}
+        self.labels: dict[Label, FullStmt] = {}
         self.begin_label = begin_label
         self.stop_label = stop_label
 
-    def read(self, toks):
+    def read(self, toks: Toks) -> None:
+        """Read the given token list to update the database and verify its
+        proofs.
+        """
         self.fs.push()
         label = None
         tok = toks.readc()
-        while tok not in (None, '$}'):
+        while tok and tok != '$}':
             if tok == '$c':
-                for tok in toks.readstat(): self.fs.add_c(tok)
+                for tok in toks.readstmt(tok):
+                    self.fs.add_c(tok)
             elif tok == '$v':
-                for tok in toks.readstat(): self.fs.add_v(tok)
+                for tok in toks.readstmt(tok):
+                    self.fs.add_v(tok)
             elif tok == '$f':
-                stat = toks.readstat()
-                if not label: raise MMError('$f must have label')
-                if len(stat) != 2: raise MMError('$f must have be length 2')
-                vprint(15, label, '$f', stat[0], stat[1], '$.')
-                self.fs.add_f(stat[1], stat[0], label)
-                self.labels[label] = ('$f', [stat[0], stat[1]])
-                label = None
-            elif tok == '$a':
-                if not label: raise MMError('$a must have label')
-                if label == self.stop_label: sys.exit(0)
-                self.labels[label] = ('$a',
-                                      self.fs.make_assertion(toks.readstat()))
+                stmt = toks.readstmt(tok)
+                if not label:
+                    raise MMError(
+                        '$f must have label (statement: {})'.format(stmt))
+                if len(stmt) != 2:
+                    raise MMError(
+                        '$f must have length two but is {}'.format(stmt))
+                self.fs.add_f(stmt[0], stmt[1], label)
+                self.labels[label] = ('$f', [stmt[0], stmt[1]])
                 label = None
             elif tok == '$e':
-                if not label: raise MMError('$e must have label')
-                stat = toks.readstat()
-                self.fs.add_e(stat, label)
-                self.labels[label] = ('$e', stat)
+                if not label:
+                    raise MMError('$e must have label')
+                stmt = toks.readstmt(tok)
+                self.fs.add_e(stmt, label)
+                self.labels[label] = ('$e', stmt)
+                label = None
+            elif tok == '$a':
+                if not label:
+                    raise MMError('$a must have label')
+                self.labels[label] = (
+                    '$a', self.fs.make_assertion(
+                        toks.readstmt(tok)))
                 label = None
             elif tok == '$p':
-                if not label: raise MMError('$p must have label')
-                if label == self.stop_label: sys.exit(0)
-                stat = toks.readstat()
+                if not label:
+                    raise MMError('$p must have label')
+                stmt = toks.readstmt(tok)
                 proof = None
                 try:
-                    i = stat.index('$=')
-                    proof = stat[i + 1:]
-                    stat = stat[:i]
-                except ValueError:
-                     raise MMError('$p must contain proof after $=')
-                if self.begin_label and label == self.begin_label:
-                    self.begin_label = None
+                    i = stmt.index('$=')
+                    proof = stmt[i + 1:]
+                    stmt = stmt[:i]
+                except ValueError as exc:
+                    raise MMError(
+                        ("$p must contain a proof after '$=' " +
+                         "(statement: {})").format(stmt)) from exc
+                dvs, f_hyps, e_hyps, conclusion = self.fs.make_assertion(stmt)
                 if not self.begin_label:
-                    vprint(1, 'verifying', label)
-                    self.verify(label, stat, proof)
-                self.labels[label] = ('$p', self.fs.make_assertion(stat))
+                    vprint(2, 'Verify:', label)
+                    self.verify(f_hyps, e_hyps, conclusion, proof)
+                self.labels[label] = ('$p', (dvs, f_hyps, e_hyps, conclusion))
                 label = None
-            elif tok == '$d': self.fs.add_d(toks.readstat())
-            elif tok == '${': self.read(toks)
-            elif tok[0] != '$': label = tok
-            else: print('tok:', tok)
+            elif tok == '$d':
+                self.fs.add_d(toks.readstmt(tok))
+            elif tok == '${':
+                self.read(toks)
+            elif tok[0] != '$':
+                label = tok
+                vprint(20, 'Label:', label)
+                if label == self.stop_label:
+                    sys.exit(0)
+                if label == self.begin_label:
+                    self.begin_label = None
+            else:
+                vprint(1, 'Unknown token:', tok)
+                # next line to avoid indentation error when 'vprint' lines are
+                # automatically removed by the sed script (see head comment)
+                return
             tok = toks.readc()
         self.fs.pop()
 
-    def apply_subst(self, stat, subst):
-        result = []
-        for tok in stat:
-            if tok in subst: result.extend(subst[tok])
-            else: result.append(tok)
-        vprint(20, 'apply_subst', (stat, subst), '=', result)
-        return result
+    def treat_step(self,
+                   step: FullStmt,
+                   stack: list[Stmt]) -> None:
+        """Carry out the given proof step (given the label to treat and the
+        current proof stack).  This modifies the given stack in place.
+        """
+        vprint(10, 'Proof step:', step)
+        steptyp, stepdat = step
+        if steptyp in ('$e', '$f'):
+            stack.append(stepdat)
+        elif steptyp in ('$a', '$p'):
+            dvs0, f_hyps0, e_hyps0, conclusion0 = stepdat
+            npop = len(f_hyps0) + len(e_hyps0)
+            sp = len(stack) - npop
+            if sp < 0:
+                raise MMError(
+                    ("Stack underflow: proof step {} requires too many " +
+                     "({}) hypotheses.").format(
+                        step,
+                        npop))
+            subst: dict[Var, Stmt] = {}
+            for typecode, var in f_hyps0:
+                entry = stack[sp]
+                if entry[0] != typecode:
+                    raise MMError(
+                        ("Proof stack entry {} does not match floating " +
+                         "hypothesis ({}, {}).").format(entry, typecode, var))
+                subst[var] = entry[1:]
+                sp += 1
+            vprint(15, 'Substitution to apply:', subst)
+            for h in e_hyps0:
+                entry = stack[sp]
+                subst_h = apply_subst(h, subst)
+                if entry != subst_h:
+                    raise MMError(("Proof stack entry {} does not match " +
+                                   "essential hypothesis {}.")
+                                  .format(entry, subst_h))
+                sp += 1
+            for x, y in dvs0:
+                vprint(16, 'dist', x, y, subst[x], subst[y])
+                x_vars = self.fs.find_vars(subst[x])
+                y_vars = self.fs.find_vars(subst[y])
+                vprint(16, 'V(x) =', x_vars)
+                vprint(16, 'V(y) =', y_vars)
+                for x0, y0 in itertools.product(x_vars, y_vars):
+                    if x0 == y0 or not self.fs.lookup_d(x0, y0):
+                        raise MMError("Disjoint variable violation: " +
+                                      "{} , {}".format(x0, y0))
+            del stack[len(stack) - npop:]
+            stack.append(apply_subst(conclusion0, subst))
+        vprint(12, 'Proof stack:', stack)
 
-    def find_vars(self, stat):
-        vars = []
-        for x in stat:
-            if not x in vars and self.fs.lookup_v(x): vars.append(x)
-        return vars
-
-    def decompress_proof(self, stat, proof):
-        dm, mand_hyp_stmts, hyp_stmts, stat = self.fs.make_assertion(stat)
-
-        mand_hyps = [self.fs.lookup_f(v) for k, v in mand_hyp_stmts]
-        hyps = [self.fs.lookup_e(s) for s in hyp_stmts]
-
-        labels = mand_hyps + hyps
-        hyp_end = len(labels)
-        ep = proof.index(')')
-        labels += proof[1:ep]
-        compressed_proof = ''.join(proof[ep+1:])
-
-        vprint(5, 'labels:', labels)
-        vprint(5, 'proof:', compressed_proof)
-
-        proof_ints = []
-        cur_int = 0
-
-        for ch in compressed_proof:
-            if ch == 'Z': proof_ints.append(-1)
-            elif 'A' <= ch and ch <= 'T':
-                cur_int = (20*cur_int + ord(ch) - ord('A') + 1)
-                proof_ints.append(cur_int - 1)
-                cur_int = 0
-            elif 'U' <= ch and ch <= 'Y':
-                cur_int = (5*cur_int + ord(ch) - ord('U') + 1)
-        vprint(5, 'proof_ints:', proof_ints)
-
-        label_end = len(labels)
-        decompressed_ints = []
-        subproofs = []
-        prev_proofs = []
-        for pf_int in proof_ints:
-            if pf_int == -1: subproofs.append(prev_proofs[-1])
-            elif 0 <= pf_int and pf_int < hyp_end:
-                prev_proofs.append([pf_int])
-                decompressed_ints.append(pf_int)
-            elif hyp_end <= pf_int and pf_int < label_end:
-                decompressed_ints.append(pf_int)
-
-                step = self.labels[labels[pf_int]]
-                step_type, step_data = step[0], step[1]
-                if step_type in ('$a', '$p'):
-                    sd, svars, shyps, sresult = step_data
-                    nshyps = len(shyps) + len(svars)
-                    if nshyps != 0:
-                        new_prevpf = [s for p in prev_proofs[-nshyps:]
-                                      for s in p] + [pf_int]
-                        prev_proofs = prev_proofs[:-nshyps]
-                        vprint(5, 'nshyps:', nshyps)
-                    else: new_prevpf = [pf_int]
-                    prev_proofs.append(new_prevpf)
-                else: prev_proofs.append([pf_int])
-            elif label_end <= pf_int:
-                pf = subproofs[pf_int - label_end]
-                vprint(5, 'expanded subpf:', pf)
-                decompressed_ints += pf
-                prev_proofs.append(pf)
-        vprint(5, 'decompressed ints:', decompressed_ints)
-
-        return [labels[i] for i in decompressed_ints]
-
-    def verify(self, stat_label, stat, proof):
-        stack = []
-        stat_type = stat[0]
-        if proof[0] == '(': proof = self.decompress_proof(stat, proof)
-
+    def treat_normal_proof(self, proof: list[str]) -> list[Stmt]:
+        """Return the proof stack once the given normal proof has been
+        processed.
+        """
+        stack: list[Stmt] = []
         for label in proof:
-            steptyp, stepdat = self.labels[label]
-            vprint(10, label, ':', self.labels[label])
+            self.treat_step(self.labels[label], stack)
+        return stack
 
-            if steptyp in ('$a', '$p'):
-                (distinct, mand_var, hyp, result) = stepdat
-                vprint(12, stepdat)
-                npop = len(mand_var) + len(hyp)
-                sp = len(stack) - npop
-                if sp < 0: raise MMError('stack underflow')
-                subst = {}
-                for (k, v) in mand_var:
-                    entry = stack[sp]
-                    if entry[0] != k:
-                        raise MMError(
-                            ("stack entry ({0}, {1}) doesn't match " +
-                             "mandatory var hyp {2!s}").format(k, v, entry))
-                    subst[v] = entry[1:]
-                    sp += 1
-                vprint(15, 'subst:', subst)
-                for x, y in distinct:
-                    vprint(16, 'dist', x, y, subst[x], subst[y])
-                    x_vars = self.find_vars(subst[x])
-                    y_vars = self.find_vars(subst[y])
-                    vprint(16, 'V(x) =', x_vars)
-                    vprint(16, 'V(y) =', y_vars)
-                    for x, y in itertools.product(x_vars, y_vars):
-                        if x == y or not self.fs.lookup_d(x, y):
-                            raise MMError("disjoint violation: {0}, {1}"
-                                          .format(x, y))
-                for h in hyp:
-                    entry = stack[sp]
-                    subst_h = self.apply_subst(h, subst)
-                    if entry != subst_h:
-                        raise MMError(("stack entry {0!s} doesn't match " +
-                                       "hypothesis {1!s}")
-                                       .format(entry, subst_h))
-                    sp += 1
-                del stack[len(stack) - npop:]
-                stack.append(self.apply_subst(result, subst))
-            elif steptyp in ('$e', '$f'): stack.append(stepdat)
+    def treat_compressed_proof(
+            self,
+            f_hyps: list[Fhyp],
+            e_hyps: list[Ehyp],
+            proof: list[str]) -> list[Stmt]:
+        """Return the proof stack once the given compressed proof for an
+        assertion with the given $f and $e-hypotheses has been processed.
+        """
+        # Preprocessing and building the lists of proof_ints and labels
+        flabels = [self.fs.lookup_f(v) for _, v in f_hyps]
+        elabels = [self.fs.lookup_e(s) for s in e_hyps]
+        plabels = flabels + elabels  # labels of implicit hypotheses
+        idx_bloc = proof.index(')')  # index of end of label bloc
+        plabels += proof[1:idx_bloc]  # labels which will be referenced later
+        compressed_proof = ''.join(proof[idx_bloc + 1:])
+        vprint(5, 'Referenced labels:', plabels)
+        label_end = len(plabels)
+        vprint(5, 'Number of referenced labels:', label_end)
+        vprint(5, 'Compressed proof steps:', compressed_proof)
+        vprint(5, 'Number of steps:', len(compressed_proof))
+        proof_ints = []  # integers referencing the labels in 'labels'
+        cur_int = 0  # counter for radix conversion
+        for ch in compressed_proof:
+            if ch == 'Z':
+                proof_ints.append(-1)
+            elif 'A' <= ch <= 'T':
+                proof_ints.append(20 * cur_int + ord(ch) - 65)  # ord('A') = 65
+                cur_int = 0
+            else:  # 'U' <= ch <= 'Y'
+                cur_int = 5 * cur_int + ord(ch) - 84  # ord('U') = 85
+        vprint(5, 'Integer-coded steps:', proof_ints)
+        # Processing of the proof
+        stack: list[Stmt] = []  # proof stack
+        # statements saved for later reuse (marked with a 'Z')
+        saved_stmts = []
+        # can be recovered as len(saved_stmts) but less efficient
+        n_saved_stmts = 0
+        for proof_int in proof_ints:
+            if proof_int == -1:  # save the current step for later reuse
+                stmt = stack[-1]
+                vprint(15, 'Saving step', stmt)
+                saved_stmts.append(stmt)
+                n_saved_stmts += 1
+            elif proof_int < label_end:
+                # proof_int denotes an implicit hypothesis or a label in the
+                # label bloc
+                self.treat_step(self.labels[plabels[proof_int]], stack)
+            elif proof_int >= label_end + n_saved_stmts:
+                MMError(
+                    "Not enough saved proof steps ({} saved but calling " +
+                    "the {}th).".format(
+                        n_saved_stmts,
+                        proof_int))
+            else:  # label_end <= proof_int < label_end + n_saved_stmts
+                # proof_int denotes an earlier proof step marked with a 'Z'
+                # A proof step that has already been proved can be treated as
+                # a dv-free and hypothesis-free axiom.
+                stmt = saved_stmts[proof_int - label_end]
+                vprint(15, 'Reusing step', stmt)
+                self.treat_step(
+                    ('$a',
+                     (set(), [], [], stmt)),
+                    stack)
+        return stack
 
-            vprint(12, 'st:', stack)
-        if len(stack) != 1: raise MMError('stack has >1 entry at end')
-        if stack[0] != stat: raise MMError("assertion proved doesn't match")
+    def verify(
+            self,
+            f_hyps: list[Fhyp],
+            e_hyps: list[Ehyp],
+            conclusion: Stmt,
+            proof: list[str]) -> None:
+        """Verify that the given proof (in normal or compressed format) is a
+        correct proof of the given assertion.
+        """
+        # It would not be useful to also pass the list of dv conditions of the
+        # assertion as an argument since other dv conditions corresponding to
+        # dummy variables should be 'lookup_d'ed anyway.
+        if proof[0] == '(':  # compressed format
+            stack = self.treat_compressed_proof(f_hyps, e_hyps, proof)
+        else:  # normal format
+            stack = self.treat_normal_proof(proof)
+        vprint(10, 'Stack at end of proof:', stack)
+        if not stack:
+            raise MMError(
+                "Empty stack at end of proof.")
+        if len(stack) > 1:
+            raise MMError(
+                "Stack has more than one entry at end of proof (top " +
+                "entry: {} ; proved assertion: {}).".format(
+                    stack[0],
+                    conclusion))
+        if stack[0] != conclusion:
+            raise MMError(("Stack entry {} does not match proved " +
+                          " assertion {}.").format(stack[0], conclusion))
+        vprint(3, 'Correct proof!')
 
-    def dump(self): print(self.labels)
+    def dump(self) -> None:
+        """Print the labels of the database."""
+        print(self.labels)
+
 
 if __name__ == '__main__':
-    parser = OptionParser()
-    parser.add_option('-b', '--begin-label', dest='begin_label',
-                      help='label to begin verifying')
-    parser.add_option('-s', '--stop-label', dest='stop_label',
-                      help='label to stop verifying')
-    (options, args) = parser.parse_args()
-    mm = MM(options.begin_label, options.stop_label)
-    mm.read(toks(sys.stdin))
-    #mm.dump()
+    """Parse the arguments and verify the given Metamath database."""
+    parser = argparse.ArgumentParser(description="""Verify a Metamath database.
+      The grammar of the whole file is verified.  Proofs are verified between
+      the statements with labels BEGIN_LABEL (included) and STOP_LABEL (not
+      included).
+
+      One can also use bash redirections:
+         '$ python3 mmverify.py < file.mm 2> file.log'
+      in place of
+         '$ python3 mmverify.py file.mm --logfile file.log'
+      but this fails in case 'file.mm' contains (directly or not) a recursive
+      inclusion statement '$[ file.mm $]'.""")
+    parser.add_argument(
+        'database',
+        nargs='?',
+        type=argparse.FileType(
+            mode='r',
+            encoding='ascii'),
+        default=sys.stdin,
+        help="""database (Metamath file) to verify, expressed using relative
+          path (defaults to <stdin>)""")
+    parser.add_argument(
+        '-l',
+        '--logfile',
+        dest='logfile',
+        type=argparse.FileType(
+            mode='w',
+            encoding='ascii'),
+        default=sys.stderr,
+        help="""file to output logs, expressed using relative path (defaults to
+          <stderr>)""")
+    parser.add_argument(
+        '-v',
+        '--verbosity',
+        dest='verbosity',
+        default=0,
+        type=int,
+        help='verbosity level (default=0 is mute; higher is more verbose)')
+    parser.add_argument(
+        '-b',
+        '--begin-label',
+        dest='begin_label',
+        type=str,
+        help="""label where to begin verifying proofs (included, if it is a
+          provable statement)""")
+    parser.add_argument(
+        '-s',
+        '--stop-label',
+        dest='stop_label',
+        type=str,
+        help='label where to stop verifying proofs (not included)')
+    args = parser.parse_args()
+    verbosity = args.verbosity
+    db_file = args.database
+    logfile = args.logfile
+    vprint(1, 'mmverify.py -- Proof verifier for the Metamath language')
+    mm = MM(args.begin_label, args.stop_label)
+    vprint(1, 'Reading source file "{}"...'.format(db_file.name))
+    mm.read(Toks(db_file))
+    vprint(1, 'No errors were found.')
+    # mm.dump()
