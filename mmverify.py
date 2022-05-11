@@ -52,6 +52,13 @@ FullStmt = tuple[Steptyp, typing.Union[Stmt, Assertion]]
 # if-statement determines in which case we are, but this is invisible to the
 # type checker.
 
+# Note: a script at github.com/metamath/set.mm removes from the following code
+# the lines beginning with (spaces followed by) 'vprint(' using the command
+#   $ sed -E '/^ *vprint\(/d' mmverify.py > mmverify.faster.py
+# In order that mmverify.faster.py be valid, one must therefore not break
+# 'vprint' commands over multiple lines, nor have indented blocs containing
+# only vprint lines (this would create ill-indented files).
+
 
 class MMError(Exception):
     """Class of Metamath errors."""
@@ -88,15 +95,20 @@ class Toks:
         """Read the next token in the token buffer, or if it is empty, split
         the next line into tokens and read from it."""
         while not self.tokbuf:
-            line = self.lines_buf[-1].readline()
-            if not line:
+            if self.lines_buf:
+                line = self.lines_buf[-1].readline()
+            else:
+                return None
+            if line:
+                self.tokbuf = line.split()
+                self.tokbuf.reverse()
+            else:
                 self.lines_buf.pop().close()
                 if not self.lines_buf:
                     return None
-            else:
-                self.tokbuf = line.split()
-                self.tokbuf.reverse()
-        return self.tokbuf.pop()
+        tok = self.tokbuf.pop()
+        vprint(90, "Token:", tok)
+        return tok
 
     def readf(self) -> StringOption:
         """Read the next token once included files have been expanded.  In the
@@ -108,33 +120,43 @@ class Toks:
             filename = self.read()
             if not filename:
                 raise MMError(
-                    "Inclusion command not terminated (EOF after '$[').")
+                    "Unclosed inclusion statement at end of file.")
             endbracket = self.read()
             if endbracket != '$]':
                 raise MMError(
-                    ("Inclusion command for file {} not " +
-                     "terminated.").format(filename))
+                    ("Inclusion statement for file {} not " +
+                     "closed with a '$]'.").format(filename))
             file = pathlib.Path(filename).resolve()
             if file not in self.imported_files:
                 self.lines_buf.append(open(file, mode='r', encoding='ascii'))
                 self.imported_files.add(file)
                 vprint(5, 'Importing file:', filename)
             tok = self.read()
+        vprint(80, "Token once included files expanded:", tok)
         return tok
 
     def readc(self) -> StringOption:
         """Read the next token once included files have been expanded and
-        ignoring comments.
+        comments have been skipped.
         """
-        while 1:
-            tok = self.readf()
-            if tok == '$(':
-                while tok != '$)':
+        tok = self.readf()
+        while tok == '$(':
+            # Note that we use 'read' in this while-loop, and not 'readf',
+            # since inclusion statements within a comment are still comments
+            # so should be skipped.
+            # The following line is not necessary but makes things clearer;
+            # note the similarity with the first three lines of 'readf'.
+            tok = self.read()
+            while tok != '$)':
+                if tok:
                     tok = self.read()
-            else:
-                return tok
+                else:
+                    raise MMError("Unclosed comment at end of file.")
+            tok = self.read()
+        vprint(70, "Token once comments skipped:", tok)
+        return tok
 
-    def readstmt(self) -> Stmt:
+    def readstmt(self, str) -> Stmt:
         """Read tokens from the input (assumed to be at the beginning of a
         statement) and return the list of tokens until the next end-statement
         token '$.'.
@@ -142,8 +164,9 @@ class Toks:
         stmt = []
         tok = self.readc()
         while tok != '$.':
-            if tok is None:
-                raise MMError("EOF before '$.'.")
+            if not tok:
+                raise MMError(
+                    "Unclosed {}-statement at end of file.".format(str))
             stmt.append(tok)
             tok = self.readc()
         vprint(20, 'Statement:', stmt)
@@ -297,7 +320,7 @@ def apply_subst(stmt: Stmt, subst: dict[Var, Stmt]) -> Stmt:
             result += subst[tok]
         else:
             result.append(tok)
-    vprint(20, 'Applying substitution', subst, 'to statement', stmt, 'results in', result)
+    vprint(20, 'Applying subst', subst, 'to stmt', stmt, ':', result)
     return result
 
 
@@ -320,13 +343,13 @@ class MM:
         tok = toks.readc()
         while tok and tok != '$}':
             if tok == '$c':
-                for tok in toks.readstmt():
+                for tok in toks.readstmt(tok):
                     self.fs.add_c(tok)
             elif tok == '$v':
-                for tok in toks.readstmt():
+                for tok in toks.readstmt(tok):
                     self.fs.add_v(tok)
             elif tok == '$f':
-                stmt = toks.readstmt()
+                stmt = toks.readstmt(tok)
                 if not label:
                     raise MMError(
                         '$f must have label (statement: {})'.format(stmt))
@@ -339,20 +362,21 @@ class MM:
             elif tok == '$e':
                 if not label:
                     raise MMError('$e must have label')
-                stmt = toks.readstmt()
+                stmt = toks.readstmt(tok)
                 self.fs.add_e(stmt, label)
                 self.labels[label] = ('$e', stmt)
                 label = None
             elif tok == '$a':
                 if not label:
                     raise MMError('$a must have label')
-                self.labels[label] = ('$a',
-                                      self.fs.make_assertion(toks.readstmt()))
+                self.labels[label] = (
+                    '$a', self.fs.make_assertion(
+                        toks.readstmt(tok)))
                 label = None
             elif tok == '$p':
                 if not label:
                     raise MMError('$p must have label')
-                stmt = toks.readstmt()
+                stmt = toks.readstmt(tok)
                 proof = None
                 try:
                     i = stmt.index('$=')
@@ -369,7 +393,7 @@ class MM:
                 self.labels[label] = ('$p', (dvs, f_hyps, e_hyps, conclusion))
                 label = None
             elif tok == '$d':
-                self.fs.add_d(toks.readstmt())
+                self.fs.add_d(toks.readstmt(tok))
             elif tok == '${':
                 self.read(toks)
             elif tok[0] != '$':
@@ -381,7 +405,8 @@ class MM:
                     self.begin_label = None
             else:
                 vprint(1, 'Unknown token:', tok)
-                # next line to avoid empty bloc when 'vprint' lines are automatically removed
+                # next line to avoid indentation error when 'vprint' lines are
+                # automatically removed by the sed script (see head comment)
                 return
             tok = toks.readc()
         self.fs.pop()
