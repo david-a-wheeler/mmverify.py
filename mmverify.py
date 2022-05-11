@@ -156,7 +156,7 @@ class Toks:
         vprint(70, "Token once comments skipped:", tok)
         return tok
 
-    def readstmt(self) -> Stmt:
+    def readstmt(self, str) -> Stmt:
         """Read tokens from the input (assumed to be at the beginning of a
         statement) and return the list of tokens until the next end-statement
         token '$.'.
@@ -165,7 +165,8 @@ class Toks:
         tok = self.readc()
         while tok != '$.':
             if not tok:
-                raise MMError("EOF before '$.'.")
+                raise MMError(
+                    "Unclosed {}-statement at end of file.".format(str))
             stmt.append(tok)
             tok = self.readc()
         vprint(20, 'Statement:', stmt)
@@ -342,13 +343,13 @@ class MM:
         tok = toks.readc()
         while tok and tok != '$}':
             if tok == '$c':
-                for tok in toks.readstmt():
+                for tok in toks.readstmt(tok):
                     self.fs.add_c(tok)
             elif tok == '$v':
-                for tok in toks.readstmt():
+                for tok in toks.readstmt(tok):
                     self.fs.add_v(tok)
             elif tok == '$f':
-                stmt = toks.readstmt()
+                stmt = toks.readstmt(tok)
                 if not label:
                     raise MMError(
                         '$f must have label (statement: {})'.format(stmt))
@@ -361,20 +362,21 @@ class MM:
             elif tok == '$e':
                 if not label:
                     raise MMError('$e must have label')
-                stmt = toks.readstmt()
+                stmt = toks.readstmt(tok)
                 self.fs.add_e(stmt, label)
                 self.labels[label] = ('$e', stmt)
                 label = None
             elif tok == '$a':
                 if not label:
                     raise MMError('$a must have label')
-                self.labels[label] = ('$a',
-                                      self.fs.make_assertion(toks.readstmt()))
+                self.labels[label] = (
+                    '$a', self.fs.make_assertion(
+                        toks.readstmt(tok)))
                 label = None
             elif tok == '$p':
                 if not label:
                     raise MMError('$p must have label')
-                stmt = toks.readstmt()
+                stmt = toks.readstmt(tok)
                 proof = None
                 try:
                     i = stmt.index('$=')
@@ -391,7 +393,7 @@ class MM:
                 self.labels[label] = ('$p', (dvs, f_hyps, e_hyps, conclusion))
                 label = None
             elif tok == '$d':
-                self.fs.add_d(toks.readstmt())
+                self.fs.add_d(toks.readstmt(tok))
             elif tok == '${':
                 self.read(toks)
             elif tok[0] != '$':
