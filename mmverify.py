@@ -313,7 +313,7 @@ class MM:
             raise MMError('var already declared and active: {}'.format(tok))
         if tok in self.constants:
             raise MMError(
-                'var already declared as const and active: {}'.format(tok))
+                'var already declared as constant: {}'.format(tok))
         self.fs[-1].v.add(tok)
 
     def add_f(self, typecode: Const, var: Var, label: Label) -> None:
@@ -322,7 +322,7 @@ class MM:
         """
         if not self.fs.lookup_v(var):
             raise MMError('var in $f not declared: {}'.format(var))
-        if not typecode in self.constants:
+        if typecode not in self.constants:
             raise MMError('typecode in $f not declared: {}'.format(typecode))
         if any(var in fr.f_labels.keys() for fr in self.fs):
             raise MMError(
