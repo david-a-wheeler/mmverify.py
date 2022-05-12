@@ -307,7 +307,7 @@ class MM:
 
     def add_v(self, tok: Var) -> None:
         """Add a variable to the frame stack top (that is, the current frame)
-        of the database.  Allow local definitions.
+        of the database.  Allow local variable declarations.
         """
         if self.fs.lookup_v(tok):
             raise MMError('var already declared and active: {}'.format(tok))
@@ -318,7 +318,7 @@ class MM:
 
     def add_f(self, typecode: Const, var: Var, label: Label) -> None:
         """Add a floating hypothesis (ordered pair (variable, typecode)) to
-        the frame stack top.
+        the frame stack top (that is, the current frame) of the database.
         """
         if not self.fs.lookup_v(var):
             raise MMError('var in $f not declared: {}'.format(var))
