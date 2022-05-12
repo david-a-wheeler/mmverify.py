@@ -335,7 +335,7 @@ class MM:
                 '$e',
                 '$a',
                     '$p'} and is_active_var and stmt_part and not self.fs.lookup_f(tok):
-                raise MMError(("Variable {} in {}-statement is not typed" +
+                raise MMError(("Variable {} in {}-statement is not typed " +
                                "by an active $f-statement).").format(tok, str))
             if not tok:
                 raise MMError(
