@@ -178,7 +178,6 @@ class Frame:
 
     def __init__(self) -> None:
         """Construct an empty frame."""
-        self.c: set[Const] = set()
         self.v: set[Var] = set()
         self.d: set[Dv] = set()
         self.f: list[Fhyp] = []
@@ -196,41 +195,6 @@ class FrameStack(list[Frame]):
         """Push an empty frame to the stack."""
         self.append(Frame())
 
-    def add_c(self, tok: Const) -> None:
-        """Add a constant to the frame stack top.  Allow local definitions."""
-        if self.lookup_c(tok):
-            raise MMError(
-                'const already declared (hence active): {}'.format(tok))
-        if self.lookup_v(tok):
-            raise MMError(
-                'const already declared as var and active: {}'.format(tok))
-        self[-1].c.add(tok)
-
-    def add_v(self, tok: Var) -> None:
-        """Add a variable to the frame stack top.  Allow local definitions."""
-        if self.lookup_v(tok):
-            raise MMError('var already declared and active: {}'.format(tok))
-        if self.lookup_c(tok):
-            raise MMError(
-                'var already declared as const and active: {}'.format(tok))
-        self[-1].v.add(tok)
-
-    def add_f(self, typecode: Const, var: Var, label: Label) -> None:
-        """Add a floating hypothesis (ordered pair (variable, typecode)) to
-        the frame stack top.
-        """
-        if not self.lookup_v(var):
-            raise MMError('var in $f not declared: {}'.format(var))
-        if not self.lookup_c(typecode):
-            raise MMError('typecode in $f not declared: {}'.format(typecode))
-        if any(var in fr.f_labels.keys() for fr in self):
-            raise MMError(
-                ("var in $f already typed by an active " +
-                 "$f-statement: {}").format(var))
-        frame = self[-1]
-        frame.f.append((typecode, var))
-        frame.f_labels[var] = label
-
     def add_e(self, stmt: Stmt, label: Label) -> None:
         """Add an essential hypothesis (token tuple) to the frame stack
         top.
@@ -247,10 +211,6 @@ class FrameStack(list[Frame]):
         self[-1].d.update((min(x, y), max(x, y))
                           for x, y in itertools.product(varlist, varlist)
                           if x != y)
-
-    def lookup_c(self, tok: Const) -> bool:
-        """Return whether the given token is an active constant."""
-        return any(tok in fr.c for fr in self)
 
     def lookup_v(self, tok: Var) -> bool:
         """Return whether the given token is an active variable."""
@@ -329,10 +289,48 @@ class MM:
 
     def __init__(self, begin_label: Label, stop_label: Label) -> None:
         """Construct an empty Metamath database."""
+        self.constants: set[Const] = set()
         self.fs = FrameStack()
         self.labels: dict[Label, FullStmt] = {}
         self.begin_label = begin_label
         self.stop_label = stop_label
+
+    def add_c(self, tok: Const) -> None:
+        """Add a constant to the database."""
+        if tok in self.constants:
+            raise MMError(
+                'Constant already declared: {}'.format(tok))
+        if self.fs.lookup_v(tok):
+            raise MMError(
+                'Trying to declare as a constant an active variable: {}'.format(tok))
+        self.constants.add(tok)
+
+    def add_v(self, tok: Var) -> None:
+        """Add a variable to the frame stack top (that is, the current frame)
+        of the database.  Allow local definitions.
+        """
+        if self.fs.lookup_v(tok):
+            raise MMError('var already declared and active: {}'.format(tok))
+        if tok in self.constants:
+            raise MMError(
+                'var already declared as const and active: {}'.format(tok))
+        self.fs[-1].v.add(tok)
+
+    def add_f(self, typecode: Const, var: Var, label: Label) -> None:
+        """Add a floating hypothesis (ordered pair (variable, typecode)) to
+        the frame stack top.
+        """
+        if not self.fs.lookup_v(var):
+            raise MMError('var in $f not declared: {}'.format(var))
+        if not typecode in self.constants:
+            raise MMError('typecode in $f not declared: {}'.format(typecode))
+        if any(var in fr.f_labels.keys() for fr in self.fs):
+            raise MMError(
+                ("var in $f already typed by an active " +
+                 "$f-statement: {}").format(var))
+        frame = self.fs[-1]
+        frame.f.append((typecode, var))
+        frame.f_labels[var] = label
 
     def read(self, toks: Toks) -> None:
         """Read the given token list to update the database and verify its
@@ -344,10 +342,10 @@ class MM:
         while tok and tok != '$}':
             if tok == '$c':
                 for tok in toks.readstmt(tok):
-                    self.fs.add_c(tok)
+                    self.add_c(tok)
             elif tok == '$v':
                 for tok in toks.readstmt(tok):
-                    self.fs.add_v(tok)
+                    self.add_v(tok)
             elif tok == '$f':
                 stmt = toks.readstmt(tok)
                 if not label:
@@ -356,7 +354,7 @@ class MM:
                 if len(stmt) != 2:
                     raise MMError(
                         '$f must have length two but is {}'.format(stmt))
-                self.fs.add_f(stmt[0], stmt[1], label)
+                self.add_f(stmt[0], stmt[1], label)
                 self.labels[label] = ('$f', [stmt[0], stmt[1]])
                 label = None
             elif tok == '$e':
