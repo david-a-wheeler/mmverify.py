@@ -328,15 +328,17 @@ class MM:
             if tok == '$=':
                 stmt_part = False
             is_active_var = self.fs.lookup_v(tok)
-            if str in {'$d', '$e', '$a', '$p'} and stmt_part and not (
-                    tok in self.constants or is_active_var):
-                raise MMError("Token {} is not an active symbol".format(tok))
-            if str in {
-                '$e',
-                '$a',
-                    '$p'} and is_active_var and stmt_part and not self.fs.lookup_f(tok):
-                raise MMError(("Variable {} in {}-statement is not typed " +
-                               "by an active $f-statement).").format(tok, str))
+            if stmt_part:
+                if str in {'$d', '$e', '$a', '$p'} and not (
+                        tok in self.constants or is_active_var):
+                    raise MMError(
+                        "Token {} is not an active symbol".format(tok))
+                if str in {
+                        '$e',
+                        '$a',
+                        '$p'} and is_active_var and not self.fs.lookup_f(tok):
+                    raise MMError(("Variable {} in {}-statement is not typed " +
+                                   "by an active $f-statement).").format(tok, str))
             if not tok:
                 raise MMError(
                     "Unclosed {}-statement at end of file.".format(str))
