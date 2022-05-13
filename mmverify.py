@@ -420,6 +420,8 @@ class MM:
             elif tok == '$)':
                 raise MMError("Unexpected '$)' while not within a comment")
             elif tok[0] != '$':
+                if tok in self.labels:
+                    raise MMError("Label {} multiply defined.".format(tok))
                 label = tok
                 vprint(20, 'Label:', label)
                 if label == self.stop_label:
