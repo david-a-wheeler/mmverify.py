@@ -150,30 +150,14 @@ class Toks:
             # The following line is not necessary but makes things clearer;
             # note the similarity with the first three lines of 'readf'.
             tok = self.read()
-            while tok != '$)':
-                if tok:
-                    tok = self.read()
-                else:
-                    raise MMError("Unclosed comment at end of file.")
+            while tok and tok != '$)':
+                tok = self.read()
+            if not tok:
+                raise MMError("Unclosed comment at end of file.")
+            assert(tok == '$)')
             tok = self.read()
         vprint(70, "Token once comments skipped:", tok)
         return tok
-
-    def readstmt(self, str) -> Stmt:
-        """Read tokens from the input (assumed to be at the beginning of a
-        statement) and return the list of tokens until the next end-statement
-        token '$.'.
-        """
-        stmt = []
-        tok = self.readc()
-        while tok != '$.':
-            if not tok:
-                raise MMError(
-                    "Unclosed {}-statement at end of file.".format(str))
-            stmt.append(tok)
-            tok = self.readc()
-        vprint(20, 'Statement:', stmt)
-        return stmt
 
 
 class Frame:
@@ -187,6 +171,9 @@ class Frame:
         self.f_labels: dict[Var, Label] = {}
         self.e: list[Ehyp] = []
         self.e_labels: dict[tuple[Symbol, ...], Label] = {}
+        # Note: both self.e and self.e_labels are needed since the keys of
+        # self.e_labels form a set, but the order and repetitions of self.e
+        # are needed.
 
 
 class FrameStack(list[Frame]):
@@ -225,7 +212,7 @@ class FrameStack(list[Frame]):
         """
         return any((min(x, y), max(x, y)) in fr.d for fr in self)
 
-    def lookup_f(self, var: Var) -> Label:
+    def lookup_f(self, var: Var) -> typing.Optional[Label]:
         """Return the label of the active floating hypothesis which types the
         given variable.
         """
@@ -234,7 +221,7 @@ class FrameStack(list[Frame]):
                 return frame.f_labels[var]
             except KeyError:
                 pass
-        raise MMKeyError(var)
+        return None
 
     def lookup_e(self, stmt: Stmt) -> Label:
         """Return the label of the (earliest) active essential hypothesis with
@@ -297,6 +284,7 @@ class MM:
         self.labels: dict[Label, FullStmt] = {}
         self.begin_label = begin_label
         self.stop_label = stop_label
+        self.verify_proofs = not self.begin_label
 
     def add_c(self, tok: Const) -> None:
         """Add a constant to the database."""
@@ -327,13 +315,57 @@ class MM:
             raise MMError('var in $f not declared: {}'.format(var))
         if typecode not in self.constants:
             raise MMError('typecode in $f not declared: {}'.format(typecode))
-        if any(var in fr.f_labels.keys() for fr in self.fs):
+        if any(var in fr.f_labels for fr in self.fs):
             raise MMError(
                 ("var in $f already typed by an active " +
                  "$f-statement: {}").format(var))
         frame = self.fs[-1]
         frame.f.append((typecode, var))
         frame.f_labels[var] = label
+
+    def readstmt_aux(self, str: Steptyp, toks: Toks, end_token) -> Stmt:
+        """Read tokens from the input (assumed to be at the beginning of a
+        statement) and return the list of tokens until the end_token
+        (typically "$=" or "$.").
+        """
+        stmt = []
+        tok = toks.readc()
+        while tok and tok != end_token:
+            is_active_var = self.fs.lookup_v(tok)
+            if str in {'$d', '$e', '$a', '$p'} and not (
+                    tok in self.constants or is_active_var):
+                raise MMError(
+                    "Token {} is not an active symbol".format(tok))
+            if str in {
+                '$e',
+                '$a',
+                    '$p'} and is_active_var and not self.fs.lookup_f(tok):
+                raise MMError(("Variable {} in {}-statement is not typed " +
+                               "by an active $f-statement).").format(tok, str))
+            stmt.append(tok)
+            tok = toks.readc()
+        if not tok:
+            raise MMError(
+                "Unclosed {}-statement at end of file.".format(str))
+        assert(tok == end_token)
+        vprint(20, 'Statement:', stmt)
+        return stmt
+
+    def read_non_p_stmt(self, str: Steptyp, toks: Toks) -> Stmt:
+        """Read tokens from the input (assumed to be at the beginning of a
+        non-p-statement) and return the list of tokens until the next end-statement
+        token '$.'.
+        """
+        return self.readstmt_aux(str, toks, end_token="$.")
+
+    def read_p_stmt(self, toks: Toks) -> tuple[Stmt, Stmt]:
+        """Read tokens from the input (assumed to be at the beginning of a
+        p-statement) and return the couple of lists of tokens (stmt, proof)
+        appearing in "$p stmt $= proof $.".
+        """
+        stmt = self.readstmt_aux("$p", toks, end_token="$=")
+        proof = self.readstmt_aux("proof", toks, end_token="$.")
+        return stmt, proof
 
     def read(self, toks: Toks) -> None:
         """Read the given token list to update the database and verify its
@@ -344,13 +376,13 @@ class MM:
         tok = toks.readc()
         while tok and tok != '$}':
             if tok == '$c':
-                for tok in toks.readstmt(tok):
+                for tok in self.read_non_p_stmt(tok, toks):
                     self.add_c(tok)
             elif tok == '$v':
-                for tok in toks.readstmt(tok):
+                for tok in self.read_non_p_stmt(tok, toks):
                     self.add_v(tok)
             elif tok == '$f':
-                stmt = toks.readstmt(tok)
+                stmt = self.read_non_p_stmt(tok, toks)
                 if not label:
                     raise MMError(
                         '$f must have label (statement: {})'.format(stmt))
@@ -363,7 +395,7 @@ class MM:
             elif tok == '$e':
                 if not label:
                     raise MMError('$e must have label')
-                stmt = toks.readstmt(tok)
+                stmt = self.read_non_p_stmt(tok, toks)
                 self.fs.add_e(stmt, label)
                 self.labels[label] = ('$e', stmt)
                 label = None
@@ -372,43 +404,36 @@ class MM:
                     raise MMError('$a must have label')
                 self.labels[label] = (
                     '$a', self.fs.make_assertion(
-                        toks.readstmt(tok)))
+                        self.read_non_p_stmt(tok, toks)))
                 label = None
             elif tok == '$p':
                 if not label:
                     raise MMError('$p must have label')
-                stmt = toks.readstmt(tok)
-                proof = None
-                try:
-                    i = stmt.index('$=')
-                    proof = stmt[i + 1:]
-                    stmt = stmt[:i]
-                except ValueError as exc:
-                    raise MMError(
-                        ("$p must contain a proof after '$=' " +
-                         "(statement: {})").format(stmt)) from exc
+                stmt, proof = self.read_p_stmt(toks)
                 dvs, f_hyps, e_hyps, conclusion = self.fs.make_assertion(stmt)
-                if not self.begin_label:
+                if self.verify_proofs:
                     vprint(2, 'Verify:', label)
                     self.verify(f_hyps, e_hyps, conclusion, proof)
                 self.labels[label] = ('$p', (dvs, f_hyps, e_hyps, conclusion))
                 label = None
             elif tok == '$d':
-                self.fs.add_d(toks.readstmt(tok))
+                self.fs.add_d(self.read_non_p_stmt(tok, toks))
             elif tok == '${':
                 self.read(toks)
+            elif tok == '$)':
+                raise MMError("Unexpected '$)' while not within a comment")
             elif tok[0] != '$':
+                if tok in self.labels:
+                    raise MMError("Label {} multiply defined.".format(tok))
                 label = tok
                 vprint(20, 'Label:', label)
                 if label == self.stop_label:
+                    # TODO: exit gracefully the nested calls to self.read()
                     sys.exit(0)
                 if label == self.begin_label:
-                    self.begin_label = None
+                    self.verify_proofs = True
             else:
-                vprint(1, 'Unknown token:', tok)
-                # next line to avoid indentation error when 'vprint' lines are
-                # automatically removed by the sed script (see head comment)
-                return
+                raise MMError("Unknown token: {}.".format(tok))
             tok = toks.readc()
         self.fs.pop()
 
