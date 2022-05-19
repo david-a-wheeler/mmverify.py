@@ -151,6 +151,12 @@ class Toks:
             # note the similarity with the first three lines of 'readf'.
             tok = self.read()
             while tok and tok != '$)':
+                if '$(' in tok or '$)' in tok:
+                    raise MMError(
+                        ("Encountered token '{}' while reading a comment. " +
+                         "Comment contents should not contain '$(' nor " +
+                         "'$)' as a substring.  In particular, comments " +
+                         "should not nest.").format(tok))
                 tok = self.read()
             if not tok:
                 raise MMError("Unclosed comment at end of file.")
