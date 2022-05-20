@@ -161,7 +161,8 @@ class Toks:
             if not tok:
                 raise MMError("Unclosed comment at end of file.")
             assert(tok == '$)')
-            tok = self.read()
+            # 'readf' since an inclusion may follow a comment immediately
+            tok = self.readf()
         vprint(70, "Token once comments skipped:", tok)
         return tok
 
@@ -439,7 +440,7 @@ class MM:
                 if label == self.begin_label:
                     self.verify_proofs = True
             else:
-                raise MMError("Unknown token: {}.".format(tok))
+                raise MMError("Unknown token: '{}'.".format(tok))
             tok = toks.readc()
         self.fs.pop()
 
