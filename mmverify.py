@@ -39,7 +39,7 @@ import io
 Label = str
 Var = str
 Const = str
-Steptyp = str  # can actually be one of '$e', '$f', '$a', '$p'
+Stmttype = str  # can actually be only one of '$c', '$v', '$f', '$e', '$a', '$p', '$d', '$='
 StringOption = typing.Optional[str]
 Symbol = typing.Union[Var, Const]
 Stmt = list[Symbol]
@@ -47,7 +47,7 @@ Ehyp = Stmt
 Fhyp = tuple[Var, Const]
 Dv = tuple[Var, Var]
 Assertion = tuple[set[Dv], list[Fhyp], list[Ehyp], Stmt]
-FullStmt = tuple[Steptyp, typing.Union[Stmt, Assertion]]
+FullStmt = tuple[Stmttype, typing.Union[Stmt, Assertion]]
 # Actually, the second component of a FullStmt is a Stmt when its first
 # component is '$e' or '$f' and an Assertion if its first component is '$a' or
 # '$p', but this is a bit cumbersome to build it into the typing system.
@@ -90,7 +90,7 @@ class Toks:
         files to a singleton containing that file, so as to avoid multiple
         imports.
         """
-        self.lines_buf = [file]
+        self.files_buf = [file]
         self.tokbuf: list[str] = []
         self.imported_files = set({pathlib.Path(file.name).resolve()})
 
@@ -98,17 +98,19 @@ class Toks:
         """Read the next token in the token buffer, or if it is empty, split
         the next line into tokens and read from it."""
         while not self.tokbuf:
-            if self.lines_buf:
-                line = self.lines_buf[-1].readline()
+            if self.files_buf:
+                line = self.files_buf[-1].readline()
             else:
-                return None
-            if line:
+                # There is no file to read from: this can only happen if end
+                # of file is reached while within a ${ ... $} block.
+                raise MMError("Unclosed ${ ... $} block at end of file.")
+            if line:  # split the line into a list of tokens
                 self.tokbuf = line.split()
                 self.tokbuf.reverse()
-            else:
-                self.lines_buf.pop().close()
-                if not self.lines_buf:
-                    return None
+            else:  # no line: end of current file
+                self.files_buf.pop().close()
+                if not self.files_buf:
+                    return None  # End of database
         tok = self.tokbuf.pop()
         vprint(90, "Token:", tok)
         return tok
@@ -131,7 +133,16 @@ class Toks:
                      "closed with a '$]'.").format(filename))
             file = pathlib.Path(filename).resolve()
             if file not in self.imported_files:
-                self.lines_buf.append(open(file, mode='r', encoding='ascii'))
+                vprint(1, 'tokbuf:', self.tokbuf)
+                # wrap the rest of the line after the inclusion command in a
+                # file object
+                self.files_buf.append(
+                    io.StringIO(
+                        " ".join(
+                            reversed(
+                                self.tokbuf))))
+                self.tokbuf = []
+                self.files_buf.append(open(file, mode='r', encoding='ascii'))
                 self.imported_files.add(file)
                 vprint(5, 'Importing file:', filename)
             tok = self.read()
@@ -160,7 +171,7 @@ class Toks:
                 tok = self.read()
             if not tok:
                 raise MMError("Unclosed comment at end of file.")
-            assert(tok == '$)')
+            assert tok == '$)'
             # 'readf' since an inclusion may follow a comment immediately
             tok = self.readf()
         vprint(70, "Token once comments skipped:", tok)
@@ -228,7 +239,7 @@ class FrameStack(list[Frame]):
                 return frame.f_labels[var]
             except KeyError:
                 pass
-        return None
+        return None  # Variable is not actively typed
 
     def lookup_e(self, stmt: Stmt) -> Label:
         """Return the label of the (earliest) active essential hypothesis with
@@ -330,7 +341,11 @@ class MM:
         frame.f.append((typecode, var))
         frame.f_labels[var] = label
 
-    def readstmt_aux(self, str: Steptyp, toks: Toks, end_token) -> Stmt:
+    def readstmt_aux(
+            self,
+            stmttype: Stmttype,
+            toks: Toks,
+            end_token: str) -> Stmt:
         """Read tokens from the input (assumed to be at the beginning of a
         statement) and return the list of tokens until the end_token
         (typically "$=" or "$.").
@@ -339,31 +354,31 @@ class MM:
         tok = toks.readc()
         while tok and tok != end_token:
             is_active_var = self.fs.lookup_v(tok)
-            if str in {'$d', '$e', '$a', '$p'} and not (
+            if stmttype in {'$d', '$e', '$a', '$p'} and not (
                     tok in self.constants or is_active_var):
                 raise MMError(
                     "Token {} is not an active symbol".format(tok))
-            if str in {
+            if stmttype in {
                 '$e',
                 '$a',
                     '$p'} and is_active_var and not self.fs.lookup_f(tok):
                 raise MMError(("Variable {} in {}-statement is not typed " +
-                               "by an active $f-statement).").format(tok, str))
+                               "by an active $f-statement).").format(tok, stmttype))
             stmt.append(tok)
             tok = toks.readc()
         if not tok:
             raise MMError(
-                "Unclosed {}-statement at end of file.".format(str))
-        assert(tok == end_token)
+                "Unclosed {}-statement at end of file.".format(stmttype))
+        assert tok == end_token
         vprint(20, 'Statement:', stmt)
         return stmt
 
-    def read_non_p_stmt(self, str: Steptyp, toks: Toks) -> Stmt:
+    def read_non_p_stmt(self, stmttype: Stmttype, toks: Toks) -> Stmt:
         """Read tokens from the input (assumed to be at the beginning of a
-        non-p-statement) and return the list of tokens until the next end-statement
-        token '$.'.
+        non-$p-statement) and return the list of tokens until the next
+        end-statement token '$.'.
         """
-        return self.readstmt_aux(str, toks, end_token="$.")
+        return self.readstmt_aux(stmttype, toks, end_token="$.")
 
     def read_p_stmt(self, toks: Toks) -> tuple[Stmt, Stmt]:
         """Read tokens from the input (assumed to be at the beginning of a
@@ -371,7 +386,7 @@ class MM:
         appearing in "$p stmt $= proof $.".
         """
         stmt = self.readstmt_aux("$p", toks, end_token="$=")
-        proof = self.readstmt_aux("proof", toks, end_token="$.")
+        proof = self.readstmt_aux("$=", toks, end_token="$.")
         return stmt, proof
 
     def read(self, toks: Toks) -> None:
@@ -451,11 +466,11 @@ class MM:
         current proof stack).  This modifies the given stack in place.
         """
         vprint(10, 'Proof step:', step)
-        steptyp, stepdat = step
-        if steptyp in ('$e', '$f'):
-            stack.append(stepdat)
-        elif steptyp in ('$a', '$p'):
-            dvs0, f_hyps0, e_hyps0, conclusion0 = stepdat
+        steptype, stepdata = step
+        if steptype in ('$e', '$f'):
+            stack.append(stepdata)
+        elif steptype in ('$a', '$p'):
+            dvs0, f_hyps0, e_hyps0, conclusion0 = stepdata
             npop = len(f_hyps0) + len(e_hyps0)
             sp = len(stack) - npop
             if sp < 0:
