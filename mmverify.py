@@ -133,7 +133,6 @@ class Toks:
                      "closed with a '$]'.").format(filename))
             file = pathlib.Path(filename).resolve()
             if file not in self.imported_files:
-                vprint(1, 'tokbuf:', self.tokbuf)
                 # wrap the rest of the line after the inclusion command in a
                 # file object
                 self.files_buf.append(
