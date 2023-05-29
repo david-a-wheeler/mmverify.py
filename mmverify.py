@@ -39,7 +39,7 @@ import io
 Label = str
 Var = str
 Const = str
-Stmttype = str  # can actually be only one of '$c', '$v', '$f', '$e', '$a', '$p', '$d', '$='
+Stmttype = typing.Literal["$c", "$v", "$f", "$e", "$a", "$p", "$d", "$="]
 StringOption = typing.Optional[str]
 Symbol = typing.Union[Var, Const]
 Stmt = list[Symbol]
