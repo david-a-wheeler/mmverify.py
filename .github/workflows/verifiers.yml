@@ -1,0 +1,41 @@
+name: verifiers
+on: [push, pull_request, workflow_dispatch]
+
+# Run sanity test on mmverify.py.
+#
+jobs:
+  ###########################################################
+  skip_dups:
+    name: Check for duplicate jobs to avoid duplication
+    # continue-on-error: true # Uncomment once integration is finished
+    runs-on: ubuntu-latest
+    # Map a step output to a job output
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          github_token: ${{ github.token }}
+          paths_ignore: '["**/README.md", "**/docs/**"]'
+
+  ###########################################################
+  test:
+    name: Test mmverify.py
+    runs-on: ubuntu-latest
+    needs: skip_dups
+    if: ${{ needs.skip_dups.outputs.should_skip != 'true' }}
+    steps:
+      # By default checkout fetches a single commit, which is what we want.
+      # See: https://github.com/actions/checkout
+      - uses: actions/checkout@v3
+      - run: echo 'Starting'
+        # Download from GitHub. This is probably easy for GitHub.
+      - run: wget -N https://raw.githubusercontent.com/metamath/set.mm/develop/set.mm
+      - run: wget -N https://raw.githubusercontent.com/metamath/set.mm/develop/iset.mm
+      - run: wget -N https://raw.githubusercontent.com/david-a-wheeler/metamath-test/master/anatomy-bad1.mm
+      - run: ./mmverify.py set.mm
+      - run: ./mmverify.py iset.mm
+      - run: echo 'This should not pass:'
+      - run: ! ./mmverify.py anatomy-bad1.mm
+      - run: echo 'Success!'
