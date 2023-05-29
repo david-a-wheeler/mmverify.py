@@ -37,5 +37,5 @@ jobs:
       - run: ./mmverify.py set.mm
       - run: ./mmverify.py iset.mm
       - run: echo 'This should not pass:'
-      - run: ! ./mmverify.py anatomy-bad1.mm
+      - run: '! ./mmverify.py anatomy-bad1.mm'
       - run: echo 'Success!'
