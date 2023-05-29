@@ -27,6 +27,7 @@ and file inclusion
 (bj 3-Apr-2022) streamlined code; obtained significant speedup (4x on set.mm)
 by verifying compressed proofs without converting them to normal proof format;
 added type hints
+(am 29-May-2023) added typeguards
 """
 
 import sys
@@ -48,12 +49,16 @@ Fhyp = tuple[Var, Const]
 Dv = tuple[Var, Var]
 Assertion = tuple[set[Dv], list[Fhyp], list[Ehyp], Stmt]
 FullStmt = tuple[Stmttype, typing.Union[Stmt, Assertion]]
-# Actually, the second component of a FullStmt is a Stmt when its first
-# component is '$e' or '$f' and an Assertion if its first component is '$a' or
-# '$p', but this is a bit cumbersome to build it into the typing system.
-# This explains the errors when static type checking (e.g., mypy): an
-# if-statement determines in which case we are, but this is invisible to the
-# type checker.
+
+def is_hypothesis(stmt: FullStmt) -> typing.TypeGuard[tuple[Stmttype, Stmt]]:
+    """The second component of a FullStmt is a Stmt when its first
+    component is '$e' or '$f'."""
+    return stmt[0] in ('$e', '$f')
+
+def is_assertion(stmt: FullStmt) -> typing.TypeGuard[tuple[Stmttype, Assertion]]:
+    """The second component of a FullStmt is an Assertion if its first
+    component is '$a' or '$p'."""
+    return stmt[0] in ('$a', '$p')
 
 # Note: a script at github.com/metamath/set.mm removes from the following code
 # the lines beginning with (spaces followed by) 'vprint(' using the command
@@ -465,11 +470,12 @@ class MM:
         current proof stack).  This modifies the given stack in place.
         """
         vprint(10, 'Proof step:', step)
-        steptype, stepdata = step
-        if steptype in ('$e', '$f'):
-            stack.append(stepdata)
-        elif steptype in ('$a', '$p'):
-            dvs0, f_hyps0, e_hyps0, conclusion0 = stepdata
+        if is_hypothesis(step):
+            _steptype, stmt = step
+            stack.append(stmt)
+        elif is_assertion(step):
+            _steptype, assertion = step
+            dvs0, f_hyps0, e_hyps0, conclusion0 = assertion
             npop = len(f_hyps0) + len(e_hyps0)
             sp = len(stack) - npop
             if sp < 0:
@@ -565,11 +571,11 @@ class MM:
             elif proof_int < label_end:
                 # proof_int denotes an implicit hypothesis or a label in the
                 # label bloc
-                self.treat_step(self.labels[plabels[proof_int]], stack)
+                self.treat_step(self.labels[plabels[proof_int] or ''], stack)
             elif proof_int >= label_end + n_saved_stmts:
                 MMError(
-                    "Not enough saved proof steps ({} saved but calling " +
-                    "the {}th).".format(
+                    ("Not enough saved proof steps ({} saved but calling " +
+                    "the {}th).").format(
                         n_saved_stmts,
                         proof_int))
             else:  # label_end <= proof_int < label_end + n_saved_stmts
