@@ -521,10 +521,22 @@ class MM:
         processed.
         """
         stack: list[Stmt] = []
+        active_hypotheses = {label for frame in self.fs for labels in (frame.f_labels, frame.e_labels) for label in labels.values()}
         for label in proof:
-            self.treat_step(self.labels[label], stack)
+            stmt_info = self.labels.get(label)
+            if stmt_info:
+                label_type = stmt_info[0]
+                if label_type in {'$e', '$f'}:
+                    if label in active_hypotheses:
+                        self.treat_step(stmt_info, stack)
+                    else:
+                        raise MMError(f"The label {label} is the label of a nonactive hypothesis.")
+                else:
+                    self.treat_step(stmt_info, stack)
+            else:
+                raise MMError(f"No statement information found for label {label}")
         return stack
-
+    
     def treat_compressed_proof(
             self,
             f_hyps: list[Fhyp],
