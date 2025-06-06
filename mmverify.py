@@ -585,7 +585,7 @@ class MM:
                 # label bloc
                 self.treat_step(self.labels[plabels[proof_int] or ''], stack)
             elif proof_int >= label_end + n_saved_stmts:
-                MMError(
+                raise MMError(
                     ("Not enough saved proof steps ({} saved but calling " +
                     "the {}th).").format(
                         n_saved_stmts,
