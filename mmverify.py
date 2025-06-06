@@ -310,6 +310,8 @@ class MM:
 
     def add_c(self, tok: Const) -> None:
         """Add a constant to the database."""
+        if '$' in tok:
+            raise MMError("Character '$' not allowed in math symbol: {}".format(tok))
         if tok in self.constants:
             raise MMError(
                 'Constant already declared: {}'.format(tok))
@@ -322,6 +324,8 @@ class MM:
         """Add a variable to the frame stack top (that is, the current frame)
         of the database.  Allow local variable declarations.
         """
+        if '$' in tok:
+            raise MMError("Character '$' not allowed in math symbol: {}".format(tok))
         if self.fs.lookup_v(tok):
             raise MMError('var already declared and active: {}'.format(tok))
         if tok in self.constants:
