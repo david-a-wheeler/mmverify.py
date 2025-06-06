@@ -451,6 +451,8 @@ class MM:
             elif tok[0] != '$':
                 if tok in self.labels:
                     raise MMError("Label {} multiply defined.".format(tok))
+                if not all(ch.isalnum() or ch in '-_.' for ch in tok):
+                    raise MMError(("Only letters, digits, '_', '-', and '.' are allowed in labels: {}").format(tok))
                 label = tok
                 vprint(20, 'Label:', label)
                 if label == self.stop_label:
