@@ -310,6 +310,8 @@ class MM:
 
     def add_c(self, tok: Const) -> None:
         """Add a constant to the database."""
+        if '$' in tok:
+            raise MMError("Character '$' not allowed in math symbol: {}".format(tok))
         if tok in self.constants:
             raise MMError(
                 'Constant already declared: {}'.format(tok))
@@ -322,6 +324,8 @@ class MM:
         """Add a variable to the frame stack top (that is, the current frame)
         of the database.  Allow local variable declarations.
         """
+        if '$' in tok:
+            raise MMError("Character '$' not allowed in math symbol: {}".format(tok))
         if self.fs.lookup_v(tok):
             raise MMError('var already declared and active: {}'.format(tok))
         if tok in self.constants:
@@ -451,6 +455,8 @@ class MM:
             elif tok[0] != '$':
                 if tok in self.labels:
                     raise MMError("Label {} multiply defined.".format(tok))
+                if not all(ch.isalnum() or ch in '-_.' for ch in tok):
+                    raise MMError(("Only letters, digits, '_', '-', and '.' are allowed in labels: {}").format(tok))
                 label = tok
                 vprint(20, 'Label:', label)
                 if label == self.stop_label:
@@ -585,7 +591,7 @@ class MM:
                 # label bloc
                 self.treat_step(self.labels[plabels[proof_int] or ''], stack)
             elif proof_int >= label_end + n_saved_stmts:
-                MMError(
+                raise MMError(
                     ("Not enough saved proof steps ({} saved but calling " +
                     "the {}th).").format(
                         n_saved_stmts,
